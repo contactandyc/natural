@@ -1,7 +1,3 @@
-Here is a comprehensive, production-ready `README.md` that captures the entire vision, architecture, and toolset we've built.
-
----
-
 # Natural-to-Semantic-IR Compiler Framework
 
 A production-grade, deterministic compilation framework designed to migrate decades-old Software AG Natural business logic to modern Python and SQLAlchemy architectures.
@@ -102,7 +98,3 @@ src/natural/
     └── workspace.py          # Lazy dependency loading for DDMs and NSAs
 
 ```
-
-## Next Steps: Behavioral Equivalence Testing
-
-The architecture is built to support mass differential testing. To fully retire a mainframe application, the generated SQLAlchemy and Python logic should be hooked to an in-memory `sqlite3` session and tested against historical Adabas transaction data to prove mathematical equivalence.
