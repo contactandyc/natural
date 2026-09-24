@@ -2,6 +2,54 @@
 
 This is based on a chat with Gemini - https://share.gemini.google/YGNCpgsHdbme
 
+## Translation Example
+
+The framework decouples legacy syntax from the target implementation, allowing the `PythonEmitter` and `ORMEmitter` to generate clean, idiomatic code that is structurally distinct from the original Natural program.
+
+**Legacy Input (`RATECALC.nsp`):**
+```natural
+/* Freight Calculation Sample
+DEFINE DATA
+PARAMETER USING TARIFF-P
+LOCAL
+  1 #BASE-CHARGE (P9.2)
+  1 #SURCHARGE (P7.2)
+END-DEFINE
+
+FIND (1) TARIFF-VIEW WITH CLASS = #SHIP-CLASS
+  #BASE-CHARGE := RATE * #SHIP-WEIGHT
+  IF #SHIP-WEIGHT > WEIGHT-LIMIT
+    #SURCHARGE := HEAVY-SURCHARGE
+    ESCAPE BOTTOM
+  END-IF
+END-FIND
+END
+```
+
+**Generated Python Output (`ratecalc.py`):**
+```python
+from dataclasses import dataclass
+from decimal import Decimal
+from target_orm import Tariff
+
+@dataclass
+class RatecalcContext:
+    ship_class: str
+    route_zone: str
+    ship_weight: Decimal
+    final_charge: Decimal
+    base_charge: Decimal = Decimal('0')
+    surcharge: Decimal = Decimal('0')
+
+def execute_ratecalc(ctx: RatecalcContext, session):
+    for record in session.query(Tariff).filter((record.class_ == ctx.ship_class)):
+        ctx.base_charge = (record.rate * ctx.ship_weight)
+        if (ctx.ship_weight > record.weight_limit):
+            ctx.surcharge = record.heavy_surcharge
+            break
+    return ctx
+```
+
 A production-grade, deterministic compilation framework designed to migrate decades-old Software AG Natural business logic to modern Python and SQLAlchemy architectures.
 
 Instead of a fragile "regex and replace" transpiler, this framework parses Natural into a strict Semantic Intermediate Representation (IR), decoupling legacy syntax from modern domain modeling. It features a topological DAG build system, Git-style diff output, and a Human-in-the-Loop AI remediation engine for graceful syntax fallbacks.
