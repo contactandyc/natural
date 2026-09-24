@@ -1,5 +1,7 @@
 # Natural-to-Semantic-IR Compiler Framework
 
+This is based on a chat with Gemini - https://share.gemini.google/YGNCpgsHdbme
+
 A production-grade, deterministic compilation framework designed to migrate decades-old Software AG Natural business logic to modern Python and SQLAlchemy architectures.
 
 Instead of a fragile "regex and replace" transpiler, this framework parses Natural into a strict Semantic Intermediate Representation (IR), decoupling legacy syntax from modern domain modeling. It features a topological DAG build system, Git-style diff output, and a Human-in-the-Loop AI remediation engine for graceful syntax fallbacks.
