@@ -1,0 +1,142 @@
+ir_version: '1.0'
+module_id: mod.ratecalc
+symbols:
+  '#SHIP-CLASS':
+    id: sym.parameter.ship-class
+    name: '#SHIP-CLASS'
+    scope: parameter
+    semantic_type:
+      base: string
+      length: 4
+      storage: alphanumeric
+  '#ROUTE-ZONE':
+    id: sym.parameter.route-zone
+    name: '#ROUTE-ZONE'
+    scope: parameter
+    semantic_type:
+      base: string
+      length: 6
+      storage: alphanumeric
+  '#SHIP-WEIGHT':
+    id: sym.parameter.ship-weight
+    name: '#SHIP-WEIGHT'
+    scope: parameter
+    semantic_type:
+      base: decimal
+      precision: 7
+      scale: 2
+      storage: packed_decimal
+  '#FINAL-CHARGE':
+    id: sym.parameter.final-charge
+    name: '#FINAL-CHARGE'
+    scope: parameter
+    semantic_type:
+      base: decimal
+      precision: 9
+      scale: 2
+      storage: packed_decimal
+  '#BASE-CHARGE':
+    id: sym.local.base-charge
+    name: '#BASE-CHARGE'
+    scope: local
+    semantic_type:
+      base: decimal
+      precision: 9
+      scale: 2
+      storage: packed_decimal
+  '#SURCHARGE':
+    id: sym.local.surcharge
+    name: '#SURCHARGE'
+    scope: local
+    semantic_type:
+      base: decimal
+      precision: 7
+      scale: 2
+      storage: packed_decimal
+  CLASS:
+    id: sym.entity.tariff-view.class
+    name: CLASS
+    scope: entity_field
+    semantic_type:
+      base: string
+      length: 4
+      storage: alphanumeric
+  ZONE:
+    id: sym.entity.tariff-view.zone
+    name: ZONE
+    scope: entity_field
+    semantic_type:
+      base: string
+      length: 6
+      storage: alphanumeric
+  RATE:
+    id: sym.entity.tariff-view.rate
+    name: RATE
+    scope: entity_field
+    semantic_type:
+      base: decimal
+      precision: 7
+      scale: 2
+      storage: packed_decimal
+  WEIGHT-LIMIT:
+    id: sym.entity.tariff-view.weight-limit
+    name: WEIGHT-LIMIT
+    scope: entity_field
+    semantic_type:
+      base: decimal
+      precision: 7
+      scale: 2
+      storage: packed_decimal
+  HEAVY-SURCHARGE:
+    id: sym.entity.tariff-view.heavy-surcharge
+    name: HEAVY-SURCHARGE
+    scope: entity_field
+    semantic_type:
+      base: decimal
+      precision: 7
+      scale: 2
+      storage: packed_decimal
+operations:
+- op: query_iteration
+  id: loop.find_001
+  entity: TARIFF
+  natural_view: TARIFF-VIEW
+  predicate:
+    op: eq
+    lhs:
+      op: entity_field
+      symbol_id: sym.entity.tariff-view.class
+    rhs:
+      op: ref
+      symbol_id: sym.parameter.ship-class
+  cardinality: many
+  on_empty: []
+  body:
+  - op: assign
+    target_id: sym.local.base-charge
+    expr:
+      op: multiply
+      lhs:
+        op: ref
+        symbol_id: sym.entity.tariff-view.rate
+      rhs:
+        op: ref
+        symbol_id: sym.parameter.ship-weight
+  - op: branch
+    condition:
+      op: gt
+      lhs:
+        op: ref
+        symbol_id: sym.parameter.ship-weight
+      rhs:
+        op: ref
+        symbol_id: sym.entity.tariff-view.weight-limit
+    then_branch:
+    - op: assign
+      target_id: sym.local.surcharge
+      expr:
+        op: ref
+        symbol_id: sym.entity.tariff-view.heavy-surcharge
+    - op: break
+      target_loop_id: loop.find_001
+    else_branch: []

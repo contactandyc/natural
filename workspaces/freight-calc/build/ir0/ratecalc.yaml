@@ -1,0 +1,59 @@
+name: RATECALC
+includes: []
+data_areas:
+- name: TARIFF-P
+  scope: PARAMETER
+  inline_fields: []
+- name: INLINE_LOCAL
+  scope: LOCAL
+  inline_fields:
+  - level: 1
+    name: '#BASE-CHARGE'
+    format:
+      kind: packed_decimal
+      raw_spec: P9.2
+  - level: 1
+    name: '#SURCHARGE'
+    format:
+      kind: packed_decimal
+      raw_spec: P7.2
+subroutines: {}
+body:
+- statement_type: FIND
+  view_name: TARIFF-VIEW
+  descriptor: CLASS
+  operand:
+    kind: ref
+    value: '#SHIP-CLASS'
+  body:
+  - statement_type: ASSIGN
+    target: '#BASE-CHARGE'
+    value:
+      kind: binary_op
+      operator: '*'
+      left:
+        kind: ref
+        value: RATE
+      right:
+        kind: ref
+        value: '#SHIP-WEIGHT'
+  - statement_type: IF
+    condition:
+      kind: binary_op
+      operator: '>'
+      left:
+        kind: ref
+        value: '#SHIP-WEIGHT'
+      right:
+        kind: ref
+        value: WEIGHT-LIMIT
+    then_branch:
+    - statement_type: ASSIGN
+      target: '#SURCHARGE'
+      value:
+        kind: ref
+        value: HEAVY-SURCHARGE
+    - statement_type: ESCAPE
+      target: BOTTOM
+    else_branch: []
+  on_empty: []
