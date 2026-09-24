@@ -1,0 +1,80 @@
+// Software AG Natural Structured Mode Grammar Subset
+?start: module
+
+module: include_stmt* define_data? statement* subroutine* end_stmt?
+
+include_stmt: "INCLUDE" IDENTIFIER
+
+define_data: "DEFINE" "DATA" data_section* "END-DEFINE"
+
+data_section: "GLOBAL" "USING" IDENTIFIER            -> gda_ref
+            | "PARAMETER" "USING" IDENTIFIER         -> pda_ref
+            | "LOCAL" "USING" IDENTIFIER             -> lda_ref
+            | "LOCAL" inline_field+                  -> local_inline
+            | "PARAMETER" inline_field+              -> parameter_inline
+            | "GLOBAL" inline_field+                 -> global_inline
+
+inline_field: LEVEL VAR_NAME "(" FIELD_FORMAT ")"
+
+LEVEL: NUMBER
+FIELD_FORMAT: /[APNIBL][0-9]+(\.[0-9]+)?/
+
+subroutine: "DEFINE" "SUBROUTINE" IDENTIFIER statement* "END-SUBROUTINE"
+
+?statement: assign_stmt
+          | find_stmt
+          | read_stmt
+          | if_stmt
+          | decide_stmt
+          | escape_stmt
+          | callnat_stmt
+
+assign_stmt: VAR_NAME ":=" expr
+
+find_stmt: "FIND" ("(" NUMBER ")")? IDENTIFIER "WITH" IDENTIFIER "=" expr no_rec_clause? statement* "END-FIND"
+
+no_rec_clause: "IF" "NO" "RECORDS" "FOUND" statement* "END-NOREC"
+
+read_stmt: "READ" ("(" NUMBER ")")? IDENTIFIER ("BY" IDENTIFIER)? statement* "END-READ"
+
+if_stmt: "IF" condition statement* ("ELSE" statement*)? "END-IF"
+
+decide_stmt: "DECIDE" "ON" "FIRST" "VALUE" "OF" expr decide_branch+ ("NONE" statement*)? "END-DECIDE"
+
+decide_branch: "VALUE" expr statement*
+
+escape_stmt: "ESCAPE" ESCAPE_DIR [ "(" IDENTIFIER ")" ]
+ESCAPE_DIR: "ROUTINE" | "BOTTOM" | "TOP"
+
+callnat_stmt: "CALLNAT" ESCAPED_STRING expr*
+
+end_stmt: "END"
+
+?condition: expr COMPARISON_OP expr -> binary_expr
+
+?expr: term
+     | expr ADD_OP term            -> binary_expr
+
+?term: factor
+     | term MULT_OP factor         -> binary_expr
+
+?factor: NUMBER                    -> num_lit
+       | ESCAPED_STRING            -> str_lit
+       | VAR_NAME                  -> var_ref
+       | IDENTIFIER                -> var_ref
+       | "(" expr ")"
+
+// Natural Identifiers & Variables
+IDENTIFIER: /[A-Z][A-Z0-9\-]*/
+VAR_NAME: /[#\+\*]?[A-Z][A-Z0-9\-]*/
+
+ADD_OP: "+" | "-"
+MULT_OP: "*" | "/"
+COMPARISON_OP: ">=" | "<=" | "<>" | ">" | "<" | "="
+
+%import common.NUMBER
+%import common.ESCAPED_STRING
+%import common.WS
+%ignore WS
+%ignore /^[ \t]*\*.*/m
+%ignore /\/\*.*(\n|$)/

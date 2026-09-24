@@ -1,0 +1,32 @@
+project_title: natural
+version: "0.1.0"
+description: "A dynamically scaffolded python/standard project"
+stack: python/standard
+date_created: 2026-09-24
+
+profile: default
+
+base_templates:
+  repo: https://github.com/contactandyc/scaffold-templates.git
+  ref: main
+
+scaffold_repo:
+  repo: https://github.com/contactandyc/scaffold-repo.git
+  ref: main
+
+# ── Dynamic Setup Variables ──
+is_cli_app: "CLI Application"
+
+# ── 3. Licenses & Legal ──
+# license_profile: apache-2.0
+# license_overrides:
+#   "src/vendor/**": mit
+
+# ── 4. Dependencies ──
+depends_on: []
+
+# (Language-specific auto-discovery config goes here)
+
+# ── Feature Flags & Overrides ──
+# features:
+#   changie: true
