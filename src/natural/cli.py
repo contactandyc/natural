@@ -5,6 +5,8 @@
 
 import difflib
 import graphlib
+import subprocess
+import sys
 from pathlib import Path
 from typing import List, Optional, Dict, Set
 import typer
@@ -24,6 +26,7 @@ app = typer.Typer(
 )
 console = Console()
 
+
 def write_if_changed(file_path: Path, new_content: str, show_diff: bool) -> bool:
     """
     Compares new_content against the file on disk.
@@ -41,7 +44,7 @@ def write_if_changed(file_path: Path, new_content: str, show_diff: bool) -> bool
                 new_content.splitlines(),
                 fromfile=f"a/{file_path.name}",
                 tofile=f"b/{file_path.name}",
-                lineterm=""
+                lineterm="",
             )
             diff_text = "\n".join(diff)
             if diff_text:
@@ -54,6 +57,7 @@ def write_if_changed(file_path: Path, new_content: str, show_diff: bool) -> bool
     file_path.write_text(new_content, encoding="utf-8")
     return True
 
+
 @app.command()
 def parse(
         source_file: Path = typer.Argument(..., help="Path to the Natural source file (.nsp, .nsn, .nss)"),
@@ -61,6 +65,7 @@ def parse(
         output: Optional[Path] = typer.Option(None, "--output", "-o", help="Optional output file path"),
         display: bool = typer.Option(True, "--display/--no-display", help="Print the generated output to console"),
         emit_python: bool = typer.Option(False, "--emit-python", "-p", help="Generate and print Python source code"),
+        emit_main: bool = typer.Option(False, "--emit-main", help="Include runnable __main__ block in emitted Python"),
         emit_orm: bool = typer.Option(False, "--emit-orm", help="Generate SQLAlchemy ORM models from DDMs"),
 ):
     """Parses a single Natural source program (Debugging)."""
@@ -83,7 +88,7 @@ def parse(
             lang = "python"
         elif emit_python:
             emitter = PythonEmitter(ir1_module)
-            result_text = emitter.generate()
+            result_text = emitter.generate(emit_main=emit_main or source_file.suffix.lower() == ".nsp")
             lang = "python"
         else:
             result_text = serialize_to_yaml(ir1_module)
@@ -104,6 +109,7 @@ def parse(
 def build(
         workspace_dir: Path = typer.Argument(..., help="Path to the Natural workspace directory"),
         show_diff: bool = typer.Option(False, "--diff", help="Show Git-style diffs for output files that have changed"),
+        emit_main: bool = typer.Option(True, "--emit-main/--no-emit-main", help="Emit runnable if __name__ == '__main__' into .nsp outputs"),
 ):
     """Compiles an entire workspace, generates Python/ORM to a build/ directory, and diffs file changes."""
     if not workspace_dir.is_dir():
@@ -121,25 +127,22 @@ def build(
     workspace = Workspace(include_dirs=[workspace_dir])
     parser = NaturalParser()
 
-    # Track files generated during this run for cleanup
     expected_files: Set[Path] = set()
-
-    # 1. Scan Workspace and Build DAG
     dependency_graph: Dict[str, Set[str]] = {}
     file_map: Dict[str, Path] = {}
 
     for file_path in workspace_dir.glob("*.*"):
         ext = file_path.suffix.lower()
-        if ext not in ('.nsp', '.nsn', '.nsa', '.ddm'):
+        if ext not in (".nsp", ".nsn", ".nsa", ".ddm"):
             continue
 
         module_name = file_path.stem.upper()
         file_map[module_name] = file_path
         dependency_graph[module_name] = set()
 
-        if ext == '.ddm':
+        if ext == ".ddm":
             workspace.get_ddm(module_name)
-        elif ext == '.nsa':
+        elif ext == ".nsa":
             workspace.get_data_area(module_name, scope=None)
         else:
             try:
@@ -150,7 +153,7 @@ def build(
                     if getattr(stmt, "statement_type", "") == "FIND":
                         dependency_graph[module_name].add(stmt.view_name.upper())
             except Exception:
-                pass # Will be caught during actual compilation
+                pass
 
     try:
         sorter = graphlib.TopologicalSorter(dependency_graph)
@@ -161,7 +164,6 @@ def build(
 
     console.print(f"\n[bold cyan]Build Order:[/bold cyan] {' -> '.join(build_order)}\n")
 
-    # 2. Execute Build Phase
     for module_name in build_order:
         if module_name not in file_map:
             continue
@@ -169,8 +171,7 @@ def build(
         file_path = file_map[module_name]
         ext = file_path.suffix.lower()
 
-        # We only generate standalone logic for executable programs
-        if ext not in ('.nsp', '.nsn'):
+        if ext not in (".nsp", ".nsn"):
             continue
 
         console.print(f"Compiling [bold]{module_name}[/bold]...")
@@ -197,7 +198,9 @@ def build(
                 console.print(f"  [dim]↳ Unchanged:[/dim] {ir1_out.relative_to(workspace_dir)}")
 
             py_emitter = PythonEmitter(ir1)
-            py_source = py_emitter.generate()
+            # Standalone programs (.nsp) get __main__ block when emit_main is True
+            should_emit_main = emit_main and (ext == ".nsp")
+            py_source = py_emitter.generate(emit_main=should_emit_main)
             py_out = py_dir / f"{module_name.lower()}.py"
             expected_files.add(py_out)
 
@@ -209,7 +212,6 @@ def build(
         except Exception as e:
             console.print(f"  [bold red]↳ Failed:[/bold red] {e}")
 
-    # 3. Emit Universal ORM Models
     ddms = [area for key, area in workspace._cache.items() if key.startswith("DDM_")]
     if ddms:
         console.print(f"\nCompiling [bold]TARGET_ORM[/bold]...")
@@ -223,7 +225,6 @@ def build(
         else:
             console.print(f"  [dim]↳ Unchanged:[/dim] {orm_out.relative_to(workspace_dir)}")
 
-    # 4. Cleanup Phase (Garbage Collection)
     console.print("\n[dim]Running workspace cleanup...[/dim]")
     for d in [ir0_dir, ir1_dir, py_dir]:
         for file_path in d.glob("*"):
@@ -231,13 +232,33 @@ def build(
                 file_path.unlink()
                 console.print(f"  [yellow]↳ Removed obsolete file:[/yellow] {file_path.relative_to(workspace_dir)}")
 
-    # Clean up legacy state file if it exists
     legacy_state = build_dir / ".compiler_state.json"
     if legacy_state.exists():
         legacy_state.unlink()
         console.print(f"  [yellow]↳ Removed legacy state file:[/yellow] {legacy_state.relative_to(workspace_dir)}")
 
     console.print(f"\n[bold green]Workspace build complete.[/bold green] Output saved to {build_dir}")
+
+
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def run(
+        ctx: typer.Context,
+        workspace_dir: Path = typer.Argument(..., help="Path to workspace directory"),
+        module_name: str = typer.Argument(..., help="Name of executable program (e.g. EOM)"),
+):
+    """Executes a compiled Python module, forwarding any extra options directly to its CLI."""
+    target_py = workspace_dir / "build" / "python" / f"{module_name.lower()}.py"
+    if not target_py.exists():
+        console.print(f"[bold yellow]Module not found at {target_py}. Building workspace first...[/bold yellow]")
+        build(workspace_dir, show_diff=False, emit_main=True)
+
+    if not target_py.exists():
+        console.print(f"[bold red]Error:[/bold red] Failed to generate {target_py}")
+        raise typer.Exit(code=1)
+
+    cmd = [sys.executable, str(target_py)] + ctx.args
+    subprocess.run(cmd)
+
 
 if __name__ == "__main__":
     app()

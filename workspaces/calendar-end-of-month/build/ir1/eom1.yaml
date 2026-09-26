@@ -1,0 +1,124 @@
+ir_version: '1.0'
+module_id: mod.eom1
+symbols:
+  '#DATE':
+    id: sym.local.date
+    name: '#DATE'
+    scope: local
+    semantic_type:
+      base: date
+      storage: date
+    redefine_offset: 0
+  '#DATEA':
+    id: sym.local.datea
+    name: '#DATEA'
+    scope: local
+    semantic_type:
+      base: string
+      length: 8
+      storage: alphanumeric
+    redefine_offset: 0
+  YYYY:
+    id: sym.local.yyyy
+    name: YYYY
+    scope: local
+    semantic_type:
+      base: decimal
+      precision: 4
+      scale: 0
+      storage: unpacked_decimal
+    redefine_parent: sym.local.datea
+    redefine_offset: 0
+  '#DATEA.YYYY':
+    id: sym.local.yyyy
+    name: YYYY
+    scope: local
+    semantic_type:
+      base: decimal
+      precision: 4
+      scale: 0
+      storage: unpacked_decimal
+    redefine_parent: sym.local.datea
+    redefine_offset: 0
+  MM:
+    id: sym.local.mm
+    name: MM
+    scope: local
+    semantic_type:
+      base: decimal
+      precision: 2
+      scale: 0
+      storage: unpacked_decimal
+    redefine_parent: sym.local.datea
+    redefine_offset: 4
+  '#DATEA.MM':
+    id: sym.local.mm
+    name: MM
+    scope: local
+    semantic_type:
+      base: decimal
+      precision: 2
+      scale: 0
+      storage: unpacked_decimal
+    redefine_parent: sym.local.datea
+    redefine_offset: 4
+  DD:
+    id: sym.local.dd
+    name: DD
+    scope: local
+    semantic_type:
+      base: decimal
+      precision: 2
+      scale: 0
+      storage: unpacked_decimal
+    redefine_parent: sym.local.datea
+    redefine_offset: 6
+  '#DATEA.DD':
+    id: sym.local.dd
+    name: DD
+    scope: local
+    semantic_type:
+      base: decimal
+      precision: 2
+      scale: 0
+      storage: unpacked_decimal
+    redefine_parent: sym.local.datea
+    redefine_offset: 6
+operations:
+- op: assign
+  target_id: sym.local.date
+  expr:
+    op: add
+    lhs:
+      op: ref
+      symbol_id: sym.local.date
+    rhs:
+      op: literal
+      value: 31
+- op: assign
+  target_id: sym.local.datea
+  expr:
+    op: ref
+    symbol_id: sym.local.date
+  edit_mask: YYYYMMDD
+- op: assign
+  target_id: sym.local.dd
+  expr:
+    op: literal
+    value: 1
+- op: assign
+  target_id: sym.local.date
+  expr:
+    op: ref
+    symbol_id: sym.local.datea
+  edit_mask: YYYYMMDD
+- op: assign
+  target_id: sym.local.date
+  expr:
+    op: subtract
+    lhs:
+      op: ref
+      symbol_id: sym.local.date
+    rhs:
+      op: literal
+      value: 1

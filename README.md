@@ -1,6 +1,7 @@
 # Natural-to-Semantic-IR Compiler Framework
 
 This is based on a chat with Gemini - https://share.gemini.google/YGNCpgsHdbme
+as well as additional chats listed at the bottom.
 
 ## Translation Example
 
@@ -150,3 +151,11 @@ src/natural/
     └── workspace.py          # Lazy dependency loading for DDMs and NSAs
 
 ```
+
+# Chats
+
+The initial chat - https://share.gemini.google/YGNCpgsHdbme
+To support converting the following example: https://github.com/SoftwareAG/adabas-natural-code-samples/blob/main/Calculate%20End-Of-Month%20(EOM)/program.txt
+    - some of the initial chat was extended
+    - https://share.gemini.google/f7vnV9hkBHZw
+

@@ -1,0 +1,94 @@
+name: EOM1
+includes: []
+data_areas:
+- name: INLINE_LOCAL
+  scope: LOCAL
+  inline_fields:
+  - level: 1
+    name: '#DATE'
+    format:
+      kind: date
+      raw_spec: D
+  - level: 1
+    name: '#DATEA'
+    format:
+      kind: alphanumeric
+      raw_spec: A8
+  - level: 2
+    name: YYYY
+    format:
+      kind: numeric
+      raw_spec: N4
+    parent_name: '#DATEA'
+  - level: 2
+    name: MM
+    format:
+      kind: numeric
+      raw_spec: N2
+    parent_name: '#DATEA'
+  - level: 2
+    name: DD
+    format:
+      kind: numeric
+      raw_spec: N2
+    parent_name: '#DATEA'
+subroutines: {}
+body:
+- statement_type: INPUT
+  modifiers:
+  - key: AD
+    value:
+      kind: ref
+      value: M
+  fields:
+  - kind: ref
+    value: '#DATE'
+- statement_type: ASSIGN
+  target: '#DATE'
+  value:
+    kind: binary_op
+    operator: +
+    left:
+      kind: ref
+      value: '#DATE'
+    right:
+      kind: literal
+      value: 31
+- statement_type: MOVE
+  source:
+    kind: ref
+    value: '#DATE'
+  target:
+    kind: ref
+    value: '#DATEA'
+  edit_mask: YYYYMMDD
+- statement_type: ASSIGN
+  target: '#DATEA.DD'
+  value:
+    kind: literal
+    value: 1
+- statement_type: MOVE
+  source:
+    kind: ref
+    value: '#DATEA'
+  target:
+    kind: ref
+    value: '#DATE'
+  edit_mask: YYYYMMDD
+- statement_type: ASSIGN
+  target: '#DATE'
+  value:
+    kind: binary_op
+    operator: '-'
+    left:
+      kind: ref
+      value: '#DATE'
+    right:
+      kind: literal
+      value: 1
+- statement_type: PRINT
+  fields:
+  - kind: literal
+    value: 'EOM:'
+  - kind: ref
+    value: '#DATE'

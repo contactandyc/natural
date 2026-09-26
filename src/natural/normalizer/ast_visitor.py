@@ -3,7 +3,8 @@
 #
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
-from lark import Transformer, Tree, Token
+import re
+from lark import Transformer, Token
 from natural.ir.models import (
     AssignStatement,
     CallnatStatement,
@@ -20,6 +21,11 @@ from natural.ir.models import (
     ReadStatement,
     ScopeType,
     Statement,
+    LoopStatement,
+    MoveStatement,
+    InputStatement,
+    PrintStatement,
+    InputModifier,
 )
 
 
@@ -27,6 +33,7 @@ class NaturalToIRTransformer(Transformer):
     def __init__(self, module_name: str = "MODULE"):
         super().__init__()
         self.module_name = module_name
+        self._current_redefine_target: str | None = None
 
     def IDENTIFIER(self, token: Token) -> str:
         return str(token)
@@ -44,6 +51,12 @@ class NaturalToIRTransformer(Transformer):
     def ESCAPED_STRING(self, token: Token) -> str:
         return str(token)[1:-1]
 
+    def SINGLE_QUOTED_STRING(self, token: Token) -> str:
+        return str(token)[1:-1]
+
+    def DATE_LITERAL(self, token: Token) -> str:
+        return str(token)[2:-1]
+
     def LEVEL(self, token: Token) -> int:
         return int(str(token))
 
@@ -51,6 +64,12 @@ class NaturalToIRTransformer(Transformer):
         return Expression(kind="literal", value=children[0])
 
     def str_lit(self, children: list) -> Expression:
+        return Expression(kind="literal", value=children[0])
+
+    def single_str_lit(self, children: list) -> Expression:
+        return Expression(kind="literal", value=children[0])
+
+    def date_lit(self, children: list) -> Expression:
         return Expression(kind="literal", value=children[0])
 
     def var_ref(self, children: list) -> Expression:
@@ -65,7 +84,7 @@ class NaturalToIRTransformer(Transformer):
         )
 
     def assign_stmt(self, children: list) -> AssignStatement:
-        return AssignStatement(target=str(children[0]), value=children[1])
+        return AssignStatement(target=str(children[0]), value=children[2])
 
     def if_stmt(self, children: list) -> ConditionalStatement:
         cond = children[0]
@@ -90,7 +109,7 @@ class NaturalToIRTransformer(Transformer):
 
     def decide_stmt(self, children: list) -> DecideStatement:
         operand = children[0]
-        branches = [c for c in children if isinstance(c, DecideBranch)]
+        branches = [c for c in children[1:] if isinstance(c, DecideBranch)]
         none_stmts = [
             c for c in children[1:] if isinstance(c, Statement) and not isinstance(c, DecideBranch)
         ]
@@ -108,17 +127,16 @@ class NaturalToIRTransformer(Transformer):
 
         ddm = str(children[idx])
         descriptor = str(children[idx + 1])
-        operand = children[idx + 2]
+        operand = children[idx + 3]
 
         on_empty: list[Statement] = []
         body_stmts: list[Statement] = []
 
-        # Iterate through remaining nodes
-        for item in children[idx + 3:]:
+        for item in children:
             if item is None:
                 continue
             if isinstance(item, list):
-                on_empty.extend([x for x in item if isinstance(x, Statement)])
+                on_empty.extend(item)
             elif isinstance(item, Statement):
                 body_stmts.append(item)
 
@@ -142,7 +160,7 @@ class NaturalToIRTransformer(Transformer):
             by_desc = str(children[curr])
             curr += 1
 
-        body_stmts = [c for c in children[curr:] if isinstance(c, Statement)]
+        body_stmts = [c for c in children if isinstance(c, Statement)]
         return ReadStatement(view_name=ddm, by_descriptor=by_desc, body=body_stmts)
 
     def callnat_stmt(self, children: list) -> CallnatStatement:
@@ -162,7 +180,7 @@ class NaturalToIRTransformer(Transformer):
     def inline_field(self, children: list) -> DataField:
         lvl = int(children[0])
         name = str(children[1])
-        raw_fmt = str(children[2])
+        raw_fmt = str(children[2]) if len(children) > 2 and children[2] is not None else "A"
         kind_char = raw_fmt[0]
         kind_map = {
             "A": "alphanumeric",
@@ -171,12 +189,21 @@ class NaturalToIRTransformer(Transformer):
             "I": "integer",
             "B": "binary",
             "L": "boolean",
+            "D": "date",
         }
         kind = kind_map.get(kind_char, "unknown")
+
+        parent = None
+        if lvl > 1 and self._current_redefine_target:
+            parent = self._current_redefine_target
+        elif lvl == 1:
+            self._current_redefine_target = None
+
         return DataField(
             level=lvl,
             name=name,
             format=FieldFormat(kind=kind, raw_spec=raw_fmt),
+            parent_name=parent,
         )
 
     def escape_stmt(self, children: list) -> EscapeStatement:
@@ -216,8 +243,92 @@ class NaturalToIRTransformer(Transformer):
         stmts = [c for c in children[1:] if isinstance(c, Statement)]
         return name, stmts
 
+    def redefine_group(self, children: list):
+        self._current_redefine_target = str(children[1])
+        return None
+
+    def input_mod_assign(self, children: list) -> InputModifier:
+        key = str(children[0])
+        val = children[2] if len(children) >= 3 else children[1]
+        if not isinstance(val, Expression):
+            val = Expression(kind="literal", value=str(val))
+        return InputModifier(key=key, value=val)
+
+    def input_modifier(self, children: list) -> list[InputModifier]:
+        return [c for c in children if isinstance(c, InputModifier)]
+
+    def input_stmt(self, children: list) -> InputStatement:
+        fields = []
+        modifiers = []
+        for c in children:
+            if isinstance(c, Expression):
+                fields.append(c)
+            elif isinstance(c, list):
+                modifiers.extend(c)
+        return InputStatement(fields=fields, modifiers=modifiers)
+
+    def move_stmt(self, children: list) -> MoveStatement:
+        exprs = [c for c in children if isinstance(c, Expression)]
+        edit_mask = None
+        for c in children:
+            if isinstance(c, Token) and "EM=" in str(c):
+                m = re.search(r"EM=([A-Za-z0-9/.\-]+)", str(c))
+                if m:
+                    edit_mask = m.group(1)
+        return MoveStatement(source=exprs[0], target=exprs[1], edit_mask=edit_mask)
+
+    def repeat_stmt(self, children: list) -> LoopStatement:
+        cond = children[0] if isinstance(children[0], Expression) else None
+        stmts = [c for c in children if isinstance(c, Statement)]
+        return LoopStatement(condition=cond, body=stmts)
+
+    def add_stmt(self, children: list) -> AssignStatement:
+        exprs = [c for c in children if isinstance(c, Expression)]
+        val, target = exprs[0], exprs[1]
+        target_ref = Expression(kind="ref", value=str(target.value))
+        return AssignStatement(
+            target=str(target.value),
+            value=Expression(kind="binary_op", operator="+", left=target_ref, right=val),
+        )
+
+    def subtract_stmt(self, children: list) -> AssignStatement:
+        exprs = [c for c in children if isinstance(c, Expression)]
+        val, target = exprs[0], exprs[1]
+        target_ref = Expression(kind="ref", value=str(target.value))
+        return AssignStatement(
+            target=str(target.value),
+            value=Expression(kind="binary_op", operator="-", left=target_ref, right=val),
+        )
+
+    def multiply_stmt(self, children: list) -> AssignStatement:
+        exprs = [c for c in children if isinstance(c, Expression)]
+        target, val = exprs[0], exprs[1]
+        target_ref = Expression(kind="ref", value=str(target.value))
+        return AssignStatement(
+            target=str(target.value),
+            value=Expression(kind="binary_op", operator="*", left=target_ref, right=val),
+        )
+
+    def divide_stmt(self, children: list) -> AssignStatement:
+        exprs = [c for c in children if isinstance(c, Expression)]
+        val, target = exprs[0], exprs[1]
+        target_ref = Expression(kind="ref", value=str(target.value))
+        return AssignStatement(
+            target=str(target.value),
+            value=Expression(kind="binary_op", operator="/", left=target_ref, right=val),
+        )
+
+    def print_stmt(self, children: list) -> PrintStatement:
+        fields = []
+        for c in children:
+            if isinstance(c, Expression):
+                fields.append(c)
+            elif isinstance(c, str):
+                fields.append(Expression(kind="literal", value=c))
+        return PrintStatement(fields=fields)
+
     def module(self, children: list) -> NaturalModule:
-        includes: list[str] = []
+        includes: list = []
         data_areas: list[DataAreaRef] = []
         subroutines: dict[str, list[Statement]] = {}
         body: list[Statement] = []

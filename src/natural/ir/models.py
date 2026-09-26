@@ -27,6 +27,7 @@ class DataField(BaseModel):
     name: str
     format: FieldFormat
     direction: Optional[str] = None  # IN, OUT, IN_OUT
+    parent_name: Optional[str] = None  # Target variable if this field is part of a REDEFINE
 
 
 class DataAreaRef(BaseModel):
@@ -109,3 +110,32 @@ class NaturalModule(BaseModel):
     data_areas: List[DataAreaRef] = Field(default_factory=list)
     subroutines: Dict[str, List[SerializeAsAny[Statement]]] = Field(default_factory=dict)
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+
+
+class LoopStatement(Statement):
+    statement_type: str = "REPEAT"
+    condition: Optional[Expression] = None
+    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+
+
+class MoveStatement(Statement):
+    statement_type: str = "MOVE"
+    source: Expression
+    target: Expression
+    edit_mask: Optional[str] = None
+
+
+class InputModifier(BaseModel):
+    key: str
+    value: Expression
+
+
+class InputStatement(Statement):
+    statement_type: str = "INPUT"
+    modifiers: List[InputModifier] = Field(default_factory=list)
+    fields: List[Expression] = Field(default_factory=list)
+
+
+class PrintStatement(Statement):
+    statement_type: str = "PRINT"
+    fields: List[Expression] = Field(default_factory=list)

@@ -1,0 +1,120 @@
+name: EOM2
+includes: []
+data_areas:
+- name: INLINE_LOCAL
+  scope: LOCAL
+  inline_fields:
+  - level: 1
+    name: '#DATE'
+    format:
+      kind: date
+      raw_spec: D
+  - level: 1
+    name: '#T'
+    format:
+      kind: alphanumeric
+      raw_spec: A8
+  - level: 2
+    name: '#DD'
+    format:
+      kind: numeric
+      raw_spec: N2
+    parent_name: '#T'
+  - level: 1
+    name: '#D'
+    format:
+      kind: date
+      raw_spec: D
+subroutines: {}
+body:
+- statement_type: INPUT
+  modifiers:
+  - key: AD
+    value:
+      kind: ref
+      value: M
+  fields:
+  - kind: ref
+    value: '#DATE'
+- statement_type: MOVE
+  source:
+    kind: ref
+    value: '#DATE'
+  target:
+    kind: ref
+    value: '#T'
+  edit_mask: DDMMYYYY
+- statement_type: IF
+  condition:
+    kind: binary_op
+    operator: <
+    left:
+      kind: ref
+      value: '#DD'
+    right:
+      kind: literal
+      value: 28
+  then_branch:
+  - statement_type: ASSIGN
+    target: '#DD'
+    value:
+      kind: literal
+      value: 28
+  else_branch: []
+- statement_type: REPEAT
+  condition:
+    kind: binary_op
+    operator: '='
+    left:
+      kind: ref
+      value: '#DD'
+    right:
+      kind: literal
+      value: 1
+  body:
+  - statement_type: MOVE
+    source:
+      kind: ref
+      value: '#T'
+    target:
+      kind: ref
+      value: '#D'
+    edit_mask: DDMMYYYY
+  - statement_type: ASSIGN
+    target: '#D'
+    value:
+      kind: binary_op
+      operator: +
+      left:
+        kind: ref
+        value: '#D'
+      right:
+        kind: literal
+        value: 1
+  - statement_type: MOVE
+    source:
+      kind: ref
+      value: '#D'
+    target:
+      kind: ref
+      value: '#T'
+    edit_mask: DDMMYYYY
+- statement_type: ASSIGN
+  target: '#D'
+  value:
+    kind: binary_op
+    operator: '-'
+    left:
+      kind: ref
+      value: '#D'
+    right:
+      kind: literal
+      value: 1
+- statement_type: PRINT
+  fields:
+  - kind: literal
+    value: 'EOM:'
+  - kind: ref
+    value: '#DATE'
+  - kind: ref
+    value: '#D'

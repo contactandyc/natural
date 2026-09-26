@@ -10,47 +10,74 @@ define_data: "DEFINE" "DATA" data_section* "END-DEFINE"
 data_section: "GLOBAL" "USING" IDENTIFIER            -> gda_ref
             | "PARAMETER" "USING" IDENTIFIER         -> pda_ref
             | "LOCAL" "USING" IDENTIFIER             -> lda_ref
-            | "LOCAL" inline_field+                  -> local_inline
-            | "PARAMETER" inline_field+              -> parameter_inline
-            | "GLOBAL" inline_field+                 -> global_inline
+            | "LOCAL" data_item+                     -> local_inline
+            | "PARAMETER" data_item+                 -> parameter_inline
+            | "GLOBAL" data_item+                    -> global_inline
 
-inline_field: LEVEL VAR_NAME "(" FIELD_FORMAT ")"
+?data_item: inline_field | redefine_group
+
+redefine_group: LEVEL "REDEFINE" VAR_NAME
+
+inline_field: LEVEL (VAR_NAME | IDENTIFIER) ("(" FIELD_FORMAT ")")? init_clause?
+
+init_clause: "INIT" "<" /[^>]+/ ">"
 
 LEVEL: NUMBER
-FIELD_FORMAT: /[APNIBL][0-9]+(\.[0-9]+)?/
+FIELD_FORMAT: /[A-Z]([0-9]+(\.[0-9]+)?)?/
 
 subroutine: "DEFINE" "SUBROUTINE" IDENTIFIER statement* "END-SUBROUTINE"
 
 ?statement: assign_stmt
+          | compute_stmt
           | find_stmt
           | read_stmt
           | if_stmt
           | decide_stmt
           | escape_stmt
           | callnat_stmt
+          | input_stmt
+          | move_stmt
+          | repeat_stmt
+          | add_stmt
+          | subtract_stmt
+          | multiply_stmt
+          | divide_stmt
+          | print_stmt
 
-assign_stmt: VAR_NAME ":=" expr
+assign_stmt: "ASSIGN"? target_var (ASSIGN_OP | EQ) expr
+compute_stmt: "COMPUTE" target_var EQ expr -> assign_stmt
 
-find_stmt: "FIND" ("(" NUMBER ")")? IDENTIFIER "WITH" IDENTIFIER "=" expr no_rec_clause? statement* "END-FIND"
+?target_var: VAR_NAME | IDENTIFIER
 
+input_modifier: "(" input_mod_assign (","? input_mod_assign)* ")"
+input_mod_assign: (IDENTIFIER | VAR_NAME) EQ expr
+
+input_stmt: "INPUT" (expr | input_modifier)+
+move_stmt: "MOVE" "EDITED"? expr ("(" /[^)]+/ ")")? "TO" expr ("(" /[^)]+/ ")")?
+repeat_stmt: "REPEAT" ("UNTIL" condition | "WHILE" condition)? statement* "END-REPEAT"
+
+add_stmt: "ADD" "ROUNDED"? expr "TO" expr
+subtract_stmt: "SUBTRACT" "ROUNDED"? expr "FROM" expr
+multiply_stmt: "MULTIPLY" "ROUNDED"? expr "BY" expr
+divide_stmt: "DIVIDE" "ROUNDED"? expr "INTO" expr ("GIVING" expr)? ("REMAINDER" expr)?
+
+print_stmt: "PRINT" expr+
+
+find_stmt: "FIND" ("(" NUMBER ")")? IDENTIFIER "WITH" IDENTIFIER EQ expr no_rec_clause? statement* "END-FIND"
 no_rec_clause: "IF" "NO" "RECORDS" "FOUND" statement* "END-NOREC"
-
 read_stmt: "READ" ("(" NUMBER ")")? IDENTIFIER ("BY" IDENTIFIER)? statement* "END-READ"
 
 if_stmt: "IF" condition statement* ("ELSE" statement*)? "END-IF"
-
 decide_stmt: "DECIDE" "ON" "FIRST" "VALUE" "OF" expr decide_branch+ ("NONE" statement*)? "END-DECIDE"
-
 decide_branch: "VALUE" expr statement*
 
 escape_stmt: "ESCAPE" ESCAPE_DIR [ "(" IDENTIFIER ")" ]
 ESCAPE_DIR: "ROUTINE" | "BOTTOM" | "TOP"
 
-callnat_stmt: "CALLNAT" ESCAPED_STRING expr*
-
+callnat_stmt: "CALLNAT" (ESCAPED_STRING | SINGLE_QUOTED_STRING) expr*
 end_stmt: "END"
 
-?condition: expr COMPARISON_OP expr -> binary_expr
+?condition: expr (COMPARISON_OP | EQ) expr -> binary_expr
 
 ?expr: term
      | expr ADD_OP term            -> binary_expr
@@ -60,17 +87,24 @@ end_stmt: "END"
 
 ?factor: NUMBER                    -> num_lit
        | ESCAPED_STRING            -> str_lit
+       | SINGLE_QUOTED_STRING      -> single_str_lit
+       | DATE_LITERAL              -> date_lit
        | VAR_NAME                  -> var_ref
        | IDENTIFIER                -> var_ref
        | "(" expr ")"
 
-// Natural Identifiers & Variables
-IDENTIFIER: /[A-Z][A-Z0-9\-]*/
-VAR_NAME: /[#\+\*]?[A-Z][A-Z0-9\-]*/
+// Explicit Lexer Terminals
+EQ: "="
+ASSIGN_OP: ":="
+COMPARISON_OP: ">=" | "<=" | "<>" | ">" | "<"
 
+// Natural Identifiers, Variables & Literals (Allowing dot-qualified names)
+IDENTIFIER: /[A-Z][A-Z0-9\-]*/
+VAR_NAME: /[#\+\*]?[A-Z][A-Z0-9\-]*(\.[A-Z0-9\-]+)?/
+SINGLE_QUOTED_STRING: /'([^'\\]|\\.)*'/
+DATE_LITERAL: /D'[^']+'/
 ADD_OP: "+" | "-"
 MULT_OP: "*" | "/"
-COMPARISON_OP: ">=" | "<=" | "<>" | ">" | "<" | "="
 
 %import common.NUMBER
 %import common.ESCAPED_STRING

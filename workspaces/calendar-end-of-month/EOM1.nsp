@@ -1,0 +1,17 @@
+DEFINE DATA
+LOCAL
+1 #DATE (D) INIT <*DATX>
+1 #DATEA (A8)
+1 REDEFINE #DATEA
+  2 YYYY (N4)
+  2 MM (N2)
+  2 DD (N2)
+END-DEFINE
+INPUT (AD=M) #DATE
+ADD 31 TO #DATE /* for current EOM only, otherwise prior EOM
+MOVE EDITED #DATE (EM=YYYYMMDD) TO #DATEA
+#DATEA.DD := 1   /* first of current month
+MOVE EDITED #DATEA TO #DATE (EM=YYYYMMDD)
+SUBTRACT 1 FROM #DATE    /* end of prior month
+PRINT 'EOM:' #DATE
+END

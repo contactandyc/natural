@@ -1,0 +1,117 @@
+ir_version: '1.0'
+module_id: mod.eom2
+symbols:
+  '#DATE':
+    id: sym.local.date
+    name: '#DATE'
+    scope: local
+    semantic_type:
+      base: date
+      storage: date
+    redefine_offset: 0
+  '#T':
+    id: sym.local.t
+    name: '#T'
+    scope: local
+    semantic_type:
+      base: string
+      length: 8
+      storage: alphanumeric
+    redefine_offset: 0
+  '#DD':
+    id: sym.local.dd
+    name: '#DD'
+    scope: local
+    semantic_type:
+      base: decimal
+      precision: 2
+      scale: 0
+      storage: unpacked_decimal
+    redefine_parent: sym.local.t
+    redefine_offset: 0
+  '#T.#DD':
+    id: sym.local.dd
+    name: '#DD'
+    scope: local
+    semantic_type:
+      base: decimal
+      precision: 2
+      scale: 0
+      storage: unpacked_decimal
+    redefine_parent: sym.local.t
+    redefine_offset: 0
+  '#D':
+    id: sym.local.d
+    name: '#D'
+    scope: local
+    semantic_type:
+      base: date
+      storage: date
+    redefine_offset: 0
+operations:
+- op: assign
+  target_id: sym.local.t
+  expr:
+    op: ref
+    symbol_id: sym.local.date
+  edit_mask: DDMMYYYY
+- op: branch
+  condition:
+    op: lt
+    lhs:
+      op: ref
+      symbol_id: sym.local.dd
+    rhs:
+      op: literal
+      value: 28
+  then_branch:
+  - op: assign
+    target_id: sym.local.dd
+    expr:
+      op: literal
+      value: 28
+  else_branch: []
+- op: loop
+  id: loop.repeat_001
+  loop_type: until
+  condition:
+    op: eq
+    lhs:
+      op: ref
+      symbol_id: sym.local.dd
+    rhs:
+      op: literal
+      value: 1
+  body:
+  - op: assign
+    target_id: sym.local.d
+    expr:
+      op: ref
+      symbol_id: sym.local.t
+    edit_mask: DDMMYYYY
+  - op: assign
+    target_id: sym.local.d
+    expr:
+      op: add
+      lhs:
+        op: ref
+        symbol_id: sym.local.d
+      rhs:
+        op: literal
+        value: 1
+  - op: assign
+    target_id: sym.local.t
+    expr:
+      op: ref
+      symbol_id: sym.local.d
+    edit_mask: DDMMYYYY
+- op: assign
+  target_id: sym.local.d
+  expr:
+    op: subtract
+    lhs:
+      op: ref
+      symbol_id: sym.local.d
+    rhs:
+      op: literal
+      value: 1
