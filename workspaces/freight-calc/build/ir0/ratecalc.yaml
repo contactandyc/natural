@@ -4,6 +4,8 @@ data_areas:
 - name: TARIFF-P
   scope: PARAMETER
   inline_fields: []
+  views: []
+  redefines: []
 - name: INLINE_LOCAL
   scope: LOCAL
   inline_fields:
@@ -12,11 +14,19 @@ data_areas:
     format:
       kind: packed_decimal
       raw_spec: P9.2
+      length: 9
+      digits: 9
+      decimals: 2
   - level: 1
     name: '#SURCHARGE'
     format:
       kind: packed_decimal
       raw_spec: P7.2
+      length: 7
+      digits: 7
+      decimals: 2
+  views: []
+  redefines: []
 subroutines: {}
 body:
 - statement_type: FIND

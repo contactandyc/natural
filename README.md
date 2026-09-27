@@ -158,4 +158,5 @@ The initial chat - https://share.gemini.google/YGNCpgsHdbme
 To support converting the following example: https://github.com/SoftwareAG/adabas-natural-code-samples/blob/main/Calculate%20End-Of-Month%20(EOM)/program.txt
     - some of the initial chat was extended
     - https://share.gemini.google/f7vnV9hkBHZw
+Refactoring repo to allow for better parsing: https://share.gemini.google/P6Ci5PImjszJ
 

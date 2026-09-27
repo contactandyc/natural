@@ -1,0 +1,55 @@
+ir_version: '1.0'
+module_id: mod.sample
+symbols:
+  '#OFFSET':
+    id: sym.local.offset
+    name: '#OFFSET'
+    scope: local
+    semantic_type:
+      base: integer
+      length: 2
+      storage: binary
+    redefine_offset: 0
+  NAME:
+    id: sym.local.name
+    name: NAME
+    scope: local
+    semantic_type:
+      base: string
+      length: 0
+      storage: alphanumeric
+    redefine_offset: 0
+  LANG:
+    id: sym.local.lang
+    name: LANG
+    scope: local
+    semantic_type:
+      base: unknown
+      storage: '1:6'
+    redefine_offset: 0
+operations:
+- op: query_iteration
+  id: loop.read_001
+  entity: MYVIEW
+  natural_view: MYVIEW
+  predicate:
+    op: gte
+    lhs:
+      op: entity_field
+      symbol_id: sym.entity.myview.name
+    rhs:
+      op: literal
+      value: SMITH
+  cardinality: many
+  on_empty: []
+  body:
+  - op: assign
+    target_id: sym.local.offset
+    expr:
+      op: literal
+      value: 2
+  - op: assign
+    target_id: sym.local.offset
+    expr:
+      op: literal
+      value: 1

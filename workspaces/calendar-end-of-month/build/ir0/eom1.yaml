@@ -9,37 +9,47 @@ data_areas:
     format:
       kind: date
       raw_spec: D
+    init_val: '*DATX'
   - level: 1
     name: '#DATEA'
     format:
       kind: alphanumeric
       raw_spec: A8
+      length: 8
+      digits: 8
   - level: 2
     name: YYYY
     format:
       kind: numeric
       raw_spec: N4
+      length: 4
+      digits: 4
     parent_name: '#DATEA'
   - level: 2
     name: MM
     format:
       kind: numeric
       raw_spec: N2
+      length: 2
+      digits: 2
     parent_name: '#DATEA'
   - level: 2
     name: DD
     format:
       kind: numeric
       raw_spec: N2
+      length: 2
+      digits: 2
     parent_name: '#DATEA'
+  views: []
+  redefines:
+  - level: 1
+    target_name: '#DATEA'
+    fields: []
 subroutines: {}
 body:
 - statement_type: INPUT
-  modifiers:
-  - key: AD
-    value:
-      kind: ref
-      value: M
+  modifiers: []
   fields:
   - kind: ref
     value: '#DATE'

@@ -9,6 +9,7 @@ symbols:
       base: string
       length: 4
       storage: alphanumeric
+    redefine_offset: 0
   '#ROUTE-ZONE':
     id: sym.parameter.route-zone
     name: '#ROUTE-ZONE'
@@ -17,6 +18,7 @@ symbols:
       base: string
       length: 6
       storage: alphanumeric
+    redefine_offset: 0
   '#SHIP-WEIGHT':
     id: sym.parameter.ship-weight
     name: '#SHIP-WEIGHT'
@@ -26,6 +28,7 @@ symbols:
       precision: 7
       scale: 2
       storage: packed_decimal
+    redefine_offset: 0
   '#FINAL-CHARGE':
     id: sym.parameter.final-charge
     name: '#FINAL-CHARGE'
@@ -35,6 +38,7 @@ symbols:
       precision: 9
       scale: 2
       storage: packed_decimal
+    redefine_offset: 0
   '#BASE-CHARGE':
     id: sym.local.base-charge
     name: '#BASE-CHARGE'
@@ -44,6 +48,7 @@ symbols:
       precision: 9
       scale: 2
       storage: packed_decimal
+    redefine_offset: 0
   '#SURCHARGE':
     id: sym.local.surcharge
     name: '#SURCHARGE'
@@ -53,6 +58,7 @@ symbols:
       precision: 7
       scale: 2
       storage: packed_decimal
+    redefine_offset: 0
   CLASS:
     id: sym.entity.tariff-view.class
     name: CLASS
@@ -61,6 +67,7 @@ symbols:
       base: string
       length: 4
       storage: alphanumeric
+    redefine_offset: 0
   ZONE:
     id: sym.entity.tariff-view.zone
     name: ZONE
@@ -69,6 +76,7 @@ symbols:
       base: string
       length: 6
       storage: alphanumeric
+    redefine_offset: 0
   RATE:
     id: sym.entity.tariff-view.rate
     name: RATE
@@ -78,6 +86,7 @@ symbols:
       precision: 7
       scale: 2
       storage: packed_decimal
+    redefine_offset: 0
   WEIGHT-LIMIT:
     id: sym.entity.tariff-view.weight-limit
     name: WEIGHT-LIMIT
@@ -87,6 +96,7 @@ symbols:
       precision: 7
       scale: 2
       storage: packed_decimal
+    redefine_offset: 0
   HEAVY-SURCHARGE:
     id: sym.entity.tariff-view.heavy-surcharge
     name: HEAVY-SURCHARGE
@@ -96,6 +106,7 @@ symbols:
       precision: 7
       scale: 2
       storage: packed_decimal
+    redefine_offset: 0
 operations:
 - op: query_iteration
   id: loop.find_001

@@ -1,29 +1,24 @@
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
-#
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
 import re
 from pathlib import Path
 from natural.ir.models import DataAreaRef, DataField, FieldFormat, ScopeType
-from natural.normalizer.parser import NaturalParser
 
 class Workspace:
     def __init__(self, include_dirs: list[Path]):
         self.include_dirs = include_dirs
-        self.parser = NaturalParser()
         self._cache = {}
 
     def _read_file(self, name: str, exts: list[str]) -> str | None:
         """Finds and reads the first matching file in the include directories (case-insensitive)."""
         for d in self.include_dirs:
             for ext in exts:
-                # Check uppercase name (TARIFF-P.nsa)
                 p = d / f"{name}{ext}"
                 if p.exists():
                     return p.read_text(encoding='utf-8')
 
-                # Check lowercase name (tariff-p.nsa)
                 p_lower = d / f"{name.lower()}{ext}"
                 if p_lower.exists():
                     return p_lower.read_text(encoding='utf-8')
@@ -31,7 +26,6 @@ class Workspace:
 
     def get_data_area(self, name: str, scope: ScopeType | None) -> DataAreaRef | None:
         """Loads and parses a Natural data area (.nsa, .nsl, .nsg)."""
-        # Safely handle scope=None
         scope_prefix = f"{scope.value}_" if scope else ""
         cache_key = f"{scope_prefix}{name}"
 
@@ -44,16 +38,22 @@ class Workspace:
 
         # Wrap raw field lines if missing the DEFINE DATA block
         if "DEFINE DATA" not in content.upper():
-            # Default to LOCAL if no scope is provided and the block is missing
             scope_keyword = scope.value if scope else "LOCAL"
             content = f"DEFINE DATA\n{scope_keyword} USING {name}\nLOCAL\n{content}\nEND-DEFINE\nEND"
 
         try:
-            ir0 = self.parser.parse(content, module_name=name)
+            from natural.normalizer.pass1_parser import Pass1Parser
+            from natural.normalizer.pass2_dispatcher import Pass2Dispatcher
+
+            p1 = Pass1Parser(self)
+            dispatcher = Pass2Dispatcher()
+
+            pass1_ast = p1.parse(content, module_name=name)
+            ir0 = dispatcher.lower_module(pass1_ast)
+
             for area in ir0.data_areas:
                 if area.inline_fields:
                     area.name = name
-                    # If we parsed an implicit scope, update it
                     if scope:
                         area.scope = scope
                     self._cache[cache_key] = area
@@ -73,7 +73,6 @@ class Workspace:
             return None
 
         fields = []
-        # Matches typical DDM rows: "  1 AC RATE                              P  7.2  N N"
         pattern = re.compile(r'^\s*(\d+)\s+[A-Z0-9]{2}\s+([A-Z0-9\-]+)\s+([A-Z])\s+([\d\.]+)')
 
         for line in content.splitlines():

@@ -8,7 +8,9 @@ from natural.ir.models import (
     NaturalModule,
     AssignStatement,
     FindStatement,
+    ReadStatement,
     ConditionalStatement,
+    DecideStatement,
     EscapeStatement,
     Expression,
     LoopStatement,
@@ -43,6 +45,7 @@ class SemanticLoweringPass:
     def parse_format(self, raw_fmt: str) -> SemanticType:
         if not raw_fmt:
             return SemanticType(base="unknown")
+        raw_fmt = raw_fmt.strip("()")
         kind = raw_fmt[0]
         if kind in ("P", "N"):
             parts = raw_fmt[1:].split(".")
@@ -54,19 +57,28 @@ class SemanticLoweringPass:
             length = int(raw_fmt[1:]) if raw_fmt[1:].isdigit() else 0
             return SemanticType(base="string", length=length, storage="alphanumeric")
         elif kind == "D":
-            return SemanticType(base="date", storage="date")
+            return SemanticType(base="date", length=8, storage="date")
         elif kind == "L":
-            return SemanticType(base="boolean", storage="boolean")
+            return SemanticType(base="boolean", length=1, storage="boolean")
         elif kind in ("I", "B"):
-            return SemanticType(base="integer", storage="binary")
+            length = int(raw_fmt[1:]) if raw_fmt[1:].isdigit() else 4
+            return SemanticType(base="integer", length=length, storage="binary")
         return SemanticType(base="unknown", storage=raw_fmt)
 
     def _field_length(self, sem_type: SemanticType) -> int:
-        if sem_type.base == "decimal" and sem_type.precision:
-            return sem_type.precision
-        elif sem_type.base == "string" and sem_type.length:
+        """Computes field length in characters/bytes for string slicing in redefinitions."""
+        if sem_type.base == "string" and sem_type.length:
             return sem_type.length
-        return 2
+        elif sem_type.base == "decimal" and sem_type.precision:
+            return sem_type.precision
+        elif sem_type.base == "integer":
+            # Natural I1 = 1 byte, I2 = 2 bytes, I4 = 4 bytes
+            return sem_type.length or 4
+        elif sem_type.base == "date":
+            return sem_type.length or 8
+        elif sem_type.base == "boolean":
+            return 1
+        return sem_type.length or sem_type.precision or 1
 
     def build_symbol_table(self):
         import sys
@@ -88,7 +100,8 @@ class SemanticLoweringPass:
             for field in fields:
                 clean_name = field.name.lower().replace("#", "")
                 sym_id = f"sym.{area.scope.value.lower()}.{clean_name}"
-                sem_type = self.parse_format(field.format.raw_spec)
+                raw_spec = field.format.raw_spec if field.format else "A"
+                sem_type = self.parse_format(raw_spec)
 
                 parent_id = None
                 offset = 0
@@ -108,7 +121,6 @@ class SemanticLoweringPass:
                 )
                 self.symbols[field.name] = sym
 
-                # Register qualified alias (e.g. #DATEA.DD -> sym.local.dd)
                 if field.parent_name:
                     qualified = f"{field.parent_name}.{field.name}"
                     self.symbols[qualified] = sym
@@ -172,6 +184,39 @@ class SemanticLoweringPass:
                     else_branch=self.lower_statements(stmt.else_branch),
                 )
             ]
+        elif isinstance(stmt, DecideStatement):
+            if not stmt.branches:
+                return self.lower_statements(stmt.none_branch)
+
+            root_branch = None
+            current_branch = None
+            operand_expr = self.lower_expr(stmt.operand)
+
+            for branch in stmt.branches:
+                condition = SemanticExpression(
+                    op="eq",
+                    lhs=operand_expr,
+                    rhs=self.lower_expr(branch.value)
+                )
+
+                new_branch = BranchOp(
+                    condition=condition,
+                    then_branch=self.lower_statements(branch.statements),
+                    else_branch=[]
+                )
+
+                if not root_branch:
+                    root_branch = new_branch
+                    current_branch = new_branch
+                else:
+                    current_branch.else_branch = [new_branch]
+                    current_branch = new_branch
+
+            if stmt.none_branch and current_branch:
+                current_branch.else_branch = self.lower_statements(stmt.none_branch)
+
+            return [root_branch] if root_branch else []
+
         elif isinstance(stmt, LoopStatement):
             self.loop_counter += 1
             loop_id = f"loop.repeat_{self.loop_counter:03d}"
@@ -184,14 +229,15 @@ class SemanticLoweringPass:
             return [
                 LoopOp(
                     id=loop_id,
-                    loop_type="until" if cond else "infinite",
+                    loop_type=stmt.loop_type.lower() if hasattr(stmt, "loop_type") else ("until" if cond else "infinite"),
                     condition=cond,
                     body=body_ops,
                 )
             ]
-        elif isinstance(stmt, FindStatement):
+        elif isinstance(stmt, (FindStatement, ReadStatement)):
             self.loop_counter += 1
-            loop_id = f"loop.find_{self.loop_counter:03d}"
+            op_name = "find" if isinstance(stmt, FindStatement) else "read"
+            loop_id = f"loop.{op_name}_{self.loop_counter:03d}"
             self.loop_stack.append(loop_id)
 
             if self.workspace:
@@ -200,27 +246,49 @@ class SemanticLoweringPass:
                     for field in ddm.inline_fields:
                         clean_name = field.name.lower()
                         sym_id = f"sym.entity.{stmt.view_name.lower()}.{clean_name}"
+                        raw_spec = field.format.raw_spec if field.format else "A"
                         self.symbols[field.name] = Symbol(
                             id=sym_id,
                             name=field.name,
                             scope="entity_field",
-                            semantic_type=self.parse_format(field.format.raw_spec),
+                            semantic_type=self.parse_format(raw_spec),
                         )
 
-            op = QueryIterationOp(
-                id=loop_id,
-                entity=stmt.view_name.replace("-VIEW", ""),
-                natural_view=stmt.view_name,
-                predicate=SemanticExpression(
+            limit_val = getattr(stmt, "limit", None)
+            cardinality = "one" if limit_val == 1 else "many"
+
+            if isinstance(stmt, FindStatement):
+                predicate = SemanticExpression(
                     op="eq",
                     lhs=SemanticExpression(
                         op="entity_field",
                         symbol_id=f"sym.entity.{stmt.view_name.lower()}.{stmt.descriptor.lower()}",
                     ),
                     rhs=self.lower_expr(stmt.operand),
-                ),
+                )
+                on_empty = self.lower_statements(stmt.on_empty)
+            else:
+                predicate = SemanticExpression(op="literal", value=True)
+                if getattr(stmt, "starting_from", None) and getattr(stmt, "by_descriptor", None):
+                    predicate = SemanticExpression(
+                        op="gte",
+                        lhs=SemanticExpression(
+                            op="entity_field",
+                            symbol_id=f"sym.entity.{stmt.view_name.lower()}.{stmt.by_descriptor.lower()}",
+                        ),
+                        rhs=self.lower_expr(stmt.starting_from)
+                    )
+                on_empty = []
+
+            op = QueryIterationOp(
+                id=loop_id,
+                entity=stmt.view_name.replace("-VIEW", ""),
+                natural_view=stmt.view_name,
+                predicate=predicate,
+                limit=limit_val,
+                cardinality=cardinality,
                 body=self.lower_statements(stmt.body),
-                on_empty=self.lower_statements(stmt.on_empty),
+                on_empty=on_empty,
             )
             self.loop_stack.pop()
             return [op]

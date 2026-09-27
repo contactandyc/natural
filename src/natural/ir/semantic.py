@@ -87,6 +87,7 @@ class QueryIterationOp(SemanticStatement):
     entity: str
     natural_view: str
     predicate: SemanticExpression
+    limit: Optional[int] = None
     cardinality: str = "many"
     on_empty: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
     body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)

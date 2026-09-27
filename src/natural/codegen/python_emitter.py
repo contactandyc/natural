@@ -3,7 +3,7 @@
 #
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
-from typing import List, Dict
+from typing import List, Dict, Optional
 from natural.ir.semantic import (
     SemanticModule,
     Symbol,
@@ -31,12 +31,17 @@ class PythonEmitter:
             return "class_"
         return clean
 
-    def _resolve_ref(self, symbol_id: str) -> str:
+    def _resolve_ref(self, symbol_id: str, model_class: Optional[str] = None) -> str:
         parts = symbol_id.split(".")
         if len(parts) >= 3 and parts[1] in ("local", "parameter"):
             return f"ctx.{self._clean_name(parts[-1])}"
         elif len(parts) >= 3 and parts[1] == "entity":
-            return f"record.{self._clean_name(parts[-1])}"
+            col_name = self._clean_name(parts[-1])
+            # When evaluating in a query filter predicate, use the ModelClass column attribute
+            if model_class:
+                return f"{model_class}.{col_name}"
+            # Inside loop bodies, reference the current iteration row instance
+            return f"record.{col_name}"
         elif len(parts) >= 3 and parts[1] == "unresolved":
             return f"ctx.{self._clean_name(parts[-1])}_UNRESOLVED"
         return symbol_id
@@ -45,9 +50,9 @@ class PythonEmitter:
         indent = "    " * self.indent_level
         self.lines.append(f"{indent}{line}")
 
-    def emit_expr(self, expr: SemanticExpression) -> str:
+    def emit_expr(self, expr: SemanticExpression, model_class: Optional[str] = None) -> str:
         if expr.op in ("ref", "entity_field"):
-            return self._resolve_ref(expr.symbol_id)
+            return self._resolve_ref(expr.symbol_id, model_class=model_class)
         elif expr.op == "literal":
             return repr(expr.value)
         elif expr.op in ("multiply", "add", "subtract", "divide", "gt", "lt", "eq", "gte", "lte", "neq"):
@@ -65,13 +70,13 @@ class PythonEmitter:
             }
             lhs_sym = self._sym_by_id.get(expr.lhs.symbol_id) if (expr.lhs and expr.lhs.symbol_id) else None
             if lhs_sym and lhs_sym.semantic_type.base == "date" and expr.op in ("add", "subtract"):
-                lhs = self.emit_expr(expr.lhs)
+                lhs = self.emit_expr(expr.lhs, model_class=model_class)
                 rhs_val = expr.rhs.value if expr.rhs else 1
                 op = "+" if expr.op == "add" else "-"
                 return f"({lhs} {op} timedelta(days={rhs_val}))"
 
-            lhs = self.emit_expr(expr.lhs) if expr.lhs else ""
-            rhs = self.emit_expr(expr.rhs) if expr.rhs else ""
+            lhs = self.emit_expr(expr.lhs, model_class=model_class) if expr.lhs else ""
+            rhs = self.emit_expr(expr.rhs, model_class=model_class) if expr.rhs else ""
             return f"({lhs} {op_map[expr.op]} {rhs})"
         return "None"
 
@@ -140,12 +145,15 @@ class PythonEmitter:
 
         elif isinstance(op, QueryIterationOp):
             model_name = self._clean_name(op.entity).title().replace("_", "")
-            cond = self.emit_expr(op.predicate)
-            self.emit_line(f"for record in session.query({model_name}).filter({cond}):")
+            # Predicate uses model_name (e.g. Tariff.class_ == ctx.ship_class)
+            cond = self.emit_expr(op.predicate, model_class=model_name)
+            limit_clause = f".limit({op.limit})" if getattr(op, "limit", None) else ""
+            self.emit_line(f"for record in session.query({model_name}).filter({cond}){limit_clause}:")
             self.indent_level += 1
             if not op.body:
                 self.emit_line("pass")
             for sub_op in op.body:
+                # Body operations reference row record (e.g. record.rate)
                 self.emit_operation(sub_op)
             self.indent_level -= 1
 
@@ -159,7 +167,10 @@ class PythonEmitter:
         self.emit_line(f'parser = argparse.ArgumentParser(description="Standalone runner for {func_name}")')
 
         unique_syms = {s.id: s for s in self.module.symbols.values()}
-        independent_syms = [s for s in unique_syms.values() if not s.redefine_parent]
+        independent_syms = [
+            s for s in unique_syms.values()
+            if not s.redefine_parent and s.scope != "entity_field"
+        ]
         for sym in independent_syms:
             arg_name = f"--{self._clean_name(sym.name)}"
             self.emit_line(f'parser.add_argument("{arg_name}", type=str, default=None, help="Initial value for {arg_name}")')
@@ -186,11 +197,22 @@ class PythonEmitter:
             self.indent_level -= 1
 
         self.emit_line("")
+        self.emit_line("class MockQuery(list):")
+        self.indent_level += 1
+        self.emit_line("def filter(self, *args, **kwargs):")
+        self.indent_level += 1
+        self.emit_line("return self")
+        self.indent_level -= 1
+        self.emit_line("def limit(self, *args, **kwargs):")
+        self.indent_level += 1
+        self.emit_line("return self")
+        self.indent_level -= 2
+        self.emit_line("")
         self.emit_line("class MockSession:")
         self.indent_level += 1
         self.emit_line("def query(self, *args, **kwargs):")
         self.indent_level += 1
-        self.emit_line("return []")
+        self.emit_line("return MockQuery()")
         self.indent_level -= 2
         self.emit_line("")
         self.emit_line("session = MockSession()")
@@ -231,7 +253,10 @@ class PythonEmitter:
         self.indent_level += 1
 
         unique_syms = {s.id: s for s in self.module.symbols.values()}
-        independent_syms = [s for s in unique_syms.values() if not s.redefine_parent]
+        independent_syms = [
+            s for s in unique_syms.values()
+            if not s.redefine_parent and s.scope != "entity_field"
+        ]
         redefined_syms = [s for s in unique_syms.values() if s.redefine_parent]
 
         self.emit_line("def __init__(self):")

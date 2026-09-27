@@ -1,0 +1,49 @@
+?start: module
+module: statement*
+
+?statement: block | raw_statement
+
+?block: define_data_block | find_block | if_block | repeat_block | read_block | decide_block
+
+// Use + (min width 1) in regex, and make the rule optional with ? to satisfy Lark
+define_data_block: _DEFINE_DATA RAW_DATA_CONTENT? _END_DEFINE
+_DEFINE_DATA: /DEFINE\s+DATA/i
+_END_DEFINE: /END-DEFINE/i
+RAW_DATA_CONTENT: /[\s\S]+?(?=END-DEFINE)/i
+
+// Inlined tokens prefixed with _ are discarded, ensuring children[0] is raw_clause
+find_block: _FIND raw_clause statement* _END_FIND
+_FIND: /FIND/i
+_END_FIND: /END-FIND/i
+
+if_block: _IF raw_clause statement* (_ELSE statement*)? _END_IF
+_IF: /IF/i
+_ELSE: /ELSE/i
+_END_IF: /END-IF/i
+
+repeat_block: _REPEAT raw_clause statement* _END_REPEAT
+_REPEAT: /REPEAT/i
+_END_REPEAT: /END-REPEAT/i
+
+read_block: _READ raw_clause statement* _END_READ
+_READ: /READ/i
+_END_READ: /END-READ/i
+
+decide_block: _DECIDE_ON raw_clause decide_branch* none_branch? _END_DECIDE
+_DECIDE_ON: /DECIDE\s+ON/i
+_END_DECIDE: /END-DECIDE/i
+
+decide_branch: _VALUE raw_clause statement*
+_VALUE: /VALUE/i
+
+none_branch: _NONE ["VALUE"i] statement*
+_NONE: /NONE/i
+
+// Match any line that isn't a block keyword or terminator
+raw_statement: /(?!(?i:\s*(?:END-(?:FIND|IF|REPEAT|READ|DEFINE|DECIDE)|ELSE|FIND|IF|REPEAT|READ|DEFINE|DECIDE|VALUE|NONE)\b))[^\n]+/
+raw_clause: /[^\n]+/
+
+%import common.WS
+%ignore WS
+%ignore /^\s*\*.*/m
+%ignore /\/\*.*(\n|$)/

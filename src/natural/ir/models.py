@@ -1,6 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
-#
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
 from enum import Enum
@@ -25,15 +24,40 @@ class FieldFormat(BaseModel):
 class DataField(BaseModel):
     level: int = 1
     name: str
-    format: FieldFormat
+    format: Optional[FieldFormat] = None
     direction: Optional[str] = None  # IN, OUT, IN_OUT
     parent_name: Optional[str] = None  # Target variable if this field is part of a REDEFINE
+    array_dim: Optional[str] = None
+    init_val: Optional[Any] = None
+
+
+class RedefineDefinition(BaseModel):
+    level: int = 1
+    target_name: str
+    fields: List[DataField] = Field(default_factory=list)
+
+
+class ViewField(BaseModel):
+    level: int = 2
+    name: str
+    format: Optional[FieldFormat] = None
+    array_dim: Optional[str] = None
+    init_val: Optional[Any] = None
+
+
+class ViewDefinition(BaseModel):
+    level: int = 1
+    view_name: str
+    ddm_name: str
+    fields: List[ViewField] = Field(default_factory=list)
 
 
 class DataAreaRef(BaseModel):
     name: str
     scope: ScopeType
     inline_fields: List[DataField] = Field(default_factory=list)
+    views: List[ViewDefinition] = Field(default_factory=list)
+    redefines: List[RedefineDefinition] = Field(default_factory=list)
 
 
 class Expression(BaseModel):
@@ -42,6 +66,7 @@ class Expression(BaseModel):
     operator: Optional[str] = None
     left: Optional["Expression"] = None
     right: Optional["Expression"] = None
+    array_dim: Optional[str] = None
 
 
 Expression.model_rebuild()
@@ -87,6 +112,7 @@ class FindStatement(Statement):
     view_name: str
     descriptor: str
     operand: Expression
+    limit: Optional[int] = None
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
     on_empty: List[SerializeAsAny[Statement]] = Field(default_factory=list)
 
@@ -94,7 +120,10 @@ class FindStatement(Statement):
 class ReadStatement(Statement):
     statement_type: str = "READ"
     view_name: str
+    descriptor: Optional[str] = None
     by_descriptor: Optional[str] = None
+    starting_from: Optional[Expression] = None
+    limit: Optional[int] = None
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
 
 
@@ -104,16 +133,9 @@ class CallnatStatement(Statement):
     parameters: List[Expression] = Field(default_factory=list)
 
 
-class NaturalModule(BaseModel):
-    name: str
-    includes: List[str] = Field(default_factory=list)
-    data_areas: List[DataAreaRef] = Field(default_factory=list)
-    subroutines: Dict[str, List[SerializeAsAny[Statement]]] = Field(default_factory=dict)
-    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
-
-
 class LoopStatement(Statement):
     statement_type: str = "REPEAT"
+    loop_type: str = "INFINITE"  # "WHILE", "UNTIL", "INFINITE"
     condition: Optional[Expression] = None
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
 
@@ -133,9 +155,32 @@ class InputModifier(BaseModel):
 class InputStatement(Statement):
     statement_type: str = "INPUT"
     modifiers: List[InputModifier] = Field(default_factory=list)
-    fields: List[Expression] = Field(default_factory=list)
+    fields: List[Any] = Field(default_factory=list)
 
 
 class PrintStatement(Statement):
     statement_type: str = "PRINT"
-    fields: List[Expression] = Field(default_factory=list)
+    fields: List[Any] = Field(default_factory=list)
+
+
+class WriteStatement(Statement):
+    statement_type: str = "WRITE"
+    items: List[Any] = Field(default_factory=list)
+
+
+class UpdateStatement(Statement):
+    statement_type: str = "UPDATE"
+
+
+class GetStatement(Statement):
+    statement_type: str = "GET"
+    view_name: str
+    arguments: List[Expression] = Field(default_factory=list)
+
+
+class NaturalModule(BaseModel):
+    name: str
+    includes: List[str] = Field(default_factory=list)
+    data_areas: List[DataAreaRef] = Field(default_factory=list)
+    subroutines: Dict[str, List[SerializeAsAny[Statement]]] = Field(default_factory=dict)
+    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)

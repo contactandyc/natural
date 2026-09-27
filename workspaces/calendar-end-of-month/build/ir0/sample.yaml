@@ -1,0 +1,112 @@
+name: SAMPLE
+includes: []
+data_areas:
+- name: INLINE_LOCAL
+  scope: LOCAL
+  inline_fields:
+  - level: 1
+    name: '#OFFSET'
+    format:
+      kind: integer
+      raw_spec: I2
+      length: 2
+      digits: 2
+    init_val: '1'
+  - level: 2
+    name: NAME
+  - level: 2
+    name: LANG
+    format:
+      kind: unknown
+      raw_spec: '#OFFSET:#OFFSET + 5'
+  - level: 2
+    name: LANG
+    format:
+      kind: unknown
+      raw_spec: '1:1'
+  - level: 2
+    name: LANG
+    format:
+      kind: unknown
+      raw_spec: '1:6'
+  views: []
+  redefines: []
+subroutines: {}
+body:
+- statement_type: READ
+  view_name: MYVIEW
+  by_descriptor: NAME
+  starting_from:
+    kind: literal
+    value: SMITH
+  body:
+  - statement_type: WRITE
+    items:
+    - kind: literal
+      value: 5
+    - kind: ref
+      value: T
+    - kind: ref
+      value: LANG
+      array_dim: Tree(Token('RULE', 'array_dim'), [Token('__ANON_1', '#OFFSET.#OFFSET:#OFFSET
+        + 5')])
+    - kind: literal
+      value: 35
+    - kind: ref
+      value: T
+    - kind: literal
+      value: <== LANG (1:6) AFTER READ
+  -
+  - statement_type: ASSIGN
+    target: '#OFFSET'
+    value:
+      kind: literal
+      value: 2
+  - statement_type: WRITE
+    items:
+    - kind: literal
+      value: 5
+    - kind: ref
+      value: T
+    - kind: ref
+      value: LANG
+      array_dim: Tree(Token('RULE', 'array_dim'), [Token('__ANON_1', '1.1')])
+    - kind: literal
+      value: 35
+    - kind: ref
+      value: T
+    - kind: literal
+      value: <== LANG (1.1) AFTER TWO ASSIGNS
+    - kind: literal
+      value: /
+  -
+  -
+  -
+  - statement_type: WRITE
+    items:
+    - kind: literal
+      value: 5
+    - kind: ref
+      value: T
+    - kind: ref
+      value: MYVIEW2.LANG
+      array_dim: Tree(Token('RULE', 'array_dim'), [Token('__ANON_1', '1:6')])
+    - kind: literal
+      value: 35
+    - kind: ref
+      value: T
+    - kind: literal
+      value: <== AFTER UPDATE AND GET
+    - kind: literal
+      value: /
+    - kind: literal
+      value: 5
+    - kind: ref
+      value: T
+    - kind: literal
+      value: '-------------------------------------------------------'
+  - statement_type: ASSIGN
+    target: '#OFFSET'
+    value:
+      kind: literal
+      value: 1
