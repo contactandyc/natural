@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Dict, Optional, Set
 from natural.ir.semantic import (
     SemanticModule,
@@ -17,7 +17,9 @@ from natural.ir.semantic import (
     QueryIterationOp,
     SemanticExpression,
     CompressOp,
+    SeparateOp,
     ExamineOp,
+    MoveAllOp,
     ResetOp,
     CallSubroutineOp,
     EntityUpdateOp,
@@ -26,6 +28,7 @@ from natural.ir.semantic import (
     ReadWorkFileOp,
     WriteWorkFileOp,
     CloseWorkFileOp,
+    OnErrorOp,
 )
 
 
@@ -68,7 +71,14 @@ class PythonEmitter:
 
     def emit_expr(self, expr: SemanticExpression, model_class: Optional[str] = None) -> str:
         if expr.op in ("ref", "entity_field"):
-            return self._resolve_ref(expr.symbol_id, model_class=model_class)
+            base_ref = self._resolve_ref(expr.symbol_id, model_class=model_class)
+            if expr.substring:
+                start_val = self.emit_expr(expr.substring.start, model_class=model_class)
+                if expr.substring.length:
+                    len_val = self.emit_expr(expr.substring.length, model_class=model_class)
+                    return f"{base_ref}[({start_val} - 1):({start_val} - 1) + {len_val}]"
+                return f"{base_ref}[({start_val} - 1):]"
+            return base_ref
         elif expr.op == "literal":
             if isinstance(expr.value, Decimal):
                 return f"Decimal('{expr.value}')"
@@ -106,6 +116,18 @@ class PythonEmitter:
             target_sym = self._sym_by_id.get(op.target_id)
             source_sym = self._sym_by_id.get(op.expr.symbol_id) if op.expr.symbol_id else None
 
+            if op.target_substring:
+                start_val = self.emit_expr(op.target_substring.start)
+                s_idx = f"({start_val} - 1)"
+                if op.target_substring.length:
+                    len_val = self.emit_expr(op.target_substring.length)
+                    e_idx = f"({s_idx} + {len_val})"
+                else:
+                    e_idx = "None"
+                rhs_val = f"str({self.emit_expr(op.expr)})"
+                self.emit_line(f"{target} = {target}[:{s_idx}] + {rhs_val} + ({target}[{e_idx}:] if {e_idx} is not None else '')")
+                return
+
             if op.edit_mask and target_sym and source_sym:
                 py_mask = self._convert_edit_mask(op.edit_mask)
                 if target_sym.semantic_type.base == "string" and source_sym.semantic_type.base == "date":
@@ -116,7 +138,27 @@ class PythonEmitter:
                     return
 
             expr = self.emit_expr(op.expr)
-            self.emit_line(f"{target} = {expr}")
+            if op.rounded and target_sym and target_sym.semantic_type.base == "decimal":
+                scale = target_sym.semantic_type.scale or 0
+                quant = f"Decimal('1e-{scale}')" if scale > 0 else "Decimal('1')"
+                self.emit_line(f"{target} = ({expr}).quantize({quant}, rounding=ROUND_HALF_UP)")
+            elif op.rounded and target_sym and target_sym.semantic_type.base == "integer":
+                self.emit_line(f"{target} = int(round({expr}))")
+            elif target_sym and target_sym.semantic_type.base == "integer":
+                # Ensure integer division or integer conversion for I/B types
+                if op.expr.op == "divide":
+                    self.emit_line(f"{target} = int({expr})")
+                else:
+                    self.emit_line(f"{target} = {expr}")
+            else:
+                self.emit_line(f"{target} = {expr}")
+
+        elif isinstance(op, MoveAllOp):
+            target = self._resolve_ref(op.target_id)
+            sym = self._sym_by_id.get(op.target_id)
+            length = sym.semantic_type.length if sym and sym.semantic_type.length else f"len({target})"
+            fill = self.emit_expr(op.fill_char)
+            self.emit_line(f"{target} = str({fill}) * {length}")
 
         elif isinstance(op, CompressOp):
             target = self._resolve_ref(op.target_id)
@@ -124,13 +166,27 @@ class PythonEmitter:
             items_str = ", ".join(f"str({self.emit_expr(e)})" for e in op.operands)
             self.emit_line(f"{target} = {sep}.join([{items_str}])")
 
+        elif isinstance(op, SeparateOp):
+            source = self.emit_expr(op.source)
+            delimiter_code = f"str({self.emit_expr(op.delimiter)})" if op.delimiter else "None"
+            maxsplit = len(op.target_ids) - 1 if op.ignore_remainder else -1
+            self.emit_line(f"_parts = {source}.split({delimiter_code}, {maxsplit})")
+            for idx, target_id in enumerate(op.target_ids):
+                target_var = self._resolve_ref(target_id)
+                self.emit_line(f"{target_var} = _parts[{idx}] if len(_parts) > {idx} else ''")
+
         elif isinstance(op, ExamineOp):
             target = self._resolve_ref(op.target_id)
-            pattern = self.emit_expr(op.pattern)
-            if op.replace_with:
+            if op.translate_case == "UPPER":
+                self.emit_line(f"{target} = {target}.upper()")
+            elif op.translate_case == "LOWER":
+                self.emit_line(f"{target} = {target}.lower()")
+            elif op.replace_with:
+                pattern = self.emit_expr(op.pattern)
                 rep = self.emit_expr(op.replace_with)
                 self.emit_line(f"{target} = {target}.replace(str({pattern}), str({rep}))")
             elif op.giving_number_id:
+                pattern = self.emit_expr(op.pattern)
                 count_var = self._resolve_ref(op.giving_number_id)
                 self.emit_line(f"{count_var} = {target}.count(str({pattern}))")
 
@@ -279,8 +335,16 @@ class PythonEmitter:
         ]
         for sym in independent_syms:
             py_name = self._clean_name(sym.name)
-            arg_flag = f"--{py_name}"
-            self.emit_line(f'parser.add_argument("{arg_flag}", type=str, default=None, help="Initial value for {py_name}")')
+            kebab_flag = f"--{py_name.replace('_', '-')}"
+            snake_flag = f"--{py_name}"
+            if kebab_flag != snake_flag:
+                flags = f'"{kebab_flag}", "{snake_flag}"'
+            else:
+                flags = f'"{kebab_flag}"'
+
+            self.emit_line(
+                f'parser.add_argument({flags}, dest="{py_name}", type=str, default=None, help="Initial value for {py_name}")'
+            )
 
         self.emit_line("args = parser.parse_args()")
         self.emit_line(f"ctx = {class_name}()")
@@ -347,14 +411,13 @@ class PythonEmitter:
         self.indent_level -= 1
 
     def _collect_required_imports(self, emit_main: bool = False) -> List[str]:
-        """Inspects symbols and operations to emit only strictly required imports."""
         needs_os = False
         needs_decimal = False
+        needs_round_half_up = False
         needs_date = False
         needs_datetime = False
         needs_timedelta = False
 
-        # 1. Inspect symbols
         for sym in self.module.symbols.values():
             base = sym.semantic_type.base
             if base == "decimal":
@@ -362,7 +425,6 @@ class PythonEmitter:
             elif base == "date":
                 needs_date = True
 
-        # 2. Inspect operations recursively
         def scan_expr(expr):
             nonlocal needs_decimal, needs_date, needs_datetime, needs_timedelta
             if not expr:
@@ -382,12 +444,18 @@ class PythonEmitter:
                 scan_expr(item)
 
         def scan_ops(ops):
-            nonlocal needs_os, needs_decimal, needs_date, needs_datetime
+            nonlocal needs_os, needs_decimal, needs_round_half_up, needs_date, needs_datetime
             for op in ops:
                 if isinstance(op, ReadWorkFileOp):
                     needs_os = True
-                if isinstance(op, AssignOp) and op.edit_mask:
-                    needs_datetime = True
+                if isinstance(op, AssignOp):
+                    if op.rounded:
+                        target_sym = self._sym_by_id.get(op.target_id)
+                        if target_sym and target_sym.semantic_type.base == "decimal":
+                            needs_decimal = True
+                            needs_round_half_up = True
+                    if op.edit_mask:
+                        needs_datetime = True
                 if hasattr(op, "expr"):
                     scan_expr(op.expr)
                 if hasattr(op, "condition"):
@@ -403,7 +471,6 @@ class PythonEmitter:
         for sub in self.module.subroutines.values():
             scan_ops(sub.operations)
 
-        # 3. Inspect main block requirements
         if emit_main:
             for sym in self.module.symbols.values():
                 if sym.redefine_parent or sym.scope == "entity_field":
@@ -417,7 +484,10 @@ class PythonEmitter:
         if needs_os:
             import_lines.append("import os")
         if needs_decimal:
-            import_lines.append("from decimal import Decimal")
+            dec_imports = ["Decimal"]
+            if needs_round_half_up:
+                dec_imports.append("ROUND_HALF_UP")
+            import_lines.append(f"from decimal import {', '.join(dec_imports)}")
 
         datetime_parts = []
         if needs_date:
@@ -433,7 +503,6 @@ class PythonEmitter:
         return import_lines
 
     def generate(self, emit_main: bool = False) -> str:
-        # Dynamic imports based on actual usage
         import_lines = self._collect_required_imports(emit_main=emit_main)
         for imp in import_lines:
             self.emit_line(imp)
@@ -523,10 +592,32 @@ class PythonEmitter:
         func_name = f"execute_{self._clean_name(self.module.module_id)}"
         self.emit_line(f"def {func_name}(ctx: {class_name}, session):")
         self.indent_level += 1
-        for op in self.module.operations:
-            self.emit_operation(op)
-        if not self.module.operations:
-            self.emit_line("pass")
+
+        # Check if module contains an OnErrorOp
+        on_error_op = next((op for op in self.module.operations if isinstance(op, OnErrorOp)), None)
+        other_ops = [op for op in self.module.operations if not isinstance(op, OnErrorOp)]
+
+        if on_error_op:
+            self.emit_line("try:")
+            self.indent_level += 1
+            if not other_ops:
+                self.emit_line("pass")
+            for op in other_ops:
+                self.emit_operation(op)
+            self.indent_level -= 1
+            self.emit_line("except Exception as natural_err:")
+            self.indent_level += 1
+            if not on_error_op.body:
+                self.emit_line("pass")
+            for op in on_error_op.body:
+                self.emit_operation(op)
+            self.indent_level -= 1
+        else:
+            for op in other_ops:
+                self.emit_operation(op)
+            if not other_ops:
+                self.emit_line("pass")
+
         self.emit_line("return ctx")
         self.indent_level -= 1
 

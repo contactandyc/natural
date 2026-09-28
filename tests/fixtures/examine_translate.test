@@ -1,0 +1,26 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #TITLE (A20)
+1 #LOWER (A20)
+END-DEFINE
+EXAMINE #TITLE TRANSLATE INTO UPPER CASE
+EXAMINE #LOWER TRANSLATE INTO LOWER CASE
+
+=== PYTHON ===
+class ExamineTranslateContext:
+    def __init__(self):
+        self.title = ""
+        self.lower = ""
+
+def execute_examine_translate(ctx: ExamineTranslateContext, session):
+    ctx.title = ctx.title.upper()
+    ctx.lower = ctx.lower.lower()
+    return ctx
+
+=== EXECUTE ===
+- input:
+    title: "Software AG Natural"
+    lower: "UPPERCASE TEXT"
+  expected:
+    title: "SOFTWARE AG NATURAL"
+    lower: "uppercase text"

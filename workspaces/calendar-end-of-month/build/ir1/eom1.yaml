@@ -96,23 +96,27 @@ operations:
     rhs:
       op: literal
       value: 31
+  rounded: false
 - op: assign
   target_id: sym.local.datea
   expr:
     op: ref
     symbol_id: sym.local.date
   edit_mask: YYYYMMDD
+  rounded: false
 - op: assign
   target_id: sym.local.dd
   expr:
     op: literal
     value: 1
+  rounded: false
 - op: assign
   target_id: sym.local.date
   expr:
     op: ref
     symbol_id: sym.local.datea
   edit_mask: YYYYMMDD
+  rounded: false
 - op: assign
   target_id: sym.local.date
   expr:
@@ -123,3 +127,4 @@ operations:
     rhs:
       op: literal
       value: 1
+  rounded: false

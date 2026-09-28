@@ -1,0 +1,47 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #NUM    (I4)
+1 #DENOM  (I4)
+1 #RESULT (I4)
+1 #STATUS (A10)
+END-DEFINE
+ON ERROR
+    #STATUS := 'FAILED'
+    #RESULT := 0
+    ESCAPE ROUTINE
+END-ERROR
+#RESULT := #NUM / #DENOM
+#STATUS := 'OK'
+
+=== PYTHON ===
+class OnErrorContext:
+    def __init__(self):
+        self.num = 0
+        self.denom = 0
+        self.result = 0
+        self.status = ""
+
+def execute_on_error(ctx: OnErrorContext, session):
+    try:
+        ctx.result = int((ctx.num / ctx.denom))
+        ctx.status = 'OK'
+    except Exception as natural_err:
+        ctx.status = 'FAILED'
+        ctx.result = 0
+        return ctx
+    return ctx
+
+=== EXECUTE ===
+- input:
+    num: 10
+    denom: 2
+  expected:
+    result: 5
+    status: "OK"
+
+- input:
+    num: 10
+    denom: 0
+  expected:
+    result: 0
+    status: "FAILED"

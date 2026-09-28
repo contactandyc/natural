@@ -1,5 +1,4 @@
 name: SAMPLE
-includes: []
 data_areas:
 - name: INLINE_LOCAL
   scope: LOCAL
@@ -12,26 +11,26 @@ data_areas:
       length: 2
       digits: 2
     init_val: '1'
-  - level: 2
-    name: NAME
-  - level: 2
-    name: LANG
-    format:
-      kind: unknown
-      raw_spec: '#OFFSET:#OFFSET + 5'
-  - level: 2
-    name: LANG
-    format:
-      kind: unknown
-      raw_spec: '1:1'
-  - level: 2
-    name: LANG
-    format:
-      kind: unknown
-      raw_spec: '1:6'
-  views: []
-  redefines: []
-subroutines: {}
+  views:
+  - level: 1
+    view_name: MYVIEW
+    ddm_name: EMPLOYEES
+    fields:
+    - level: 2
+      name: NAME
+    - level: 2
+      name: LANG
+      array_dim: '#OFFSET:#OFFSET + 5'
+    - level: 2
+      name: LANG
+      array_dim: '1:1'
+  - level: 1
+    view_name: MYVIEW2
+    ddm_name: EMPLOYEES
+    fields:
+    - level: 2
+      name: LANG
+      array_dim: '1:6'
 body:
 - statement_type: READ
   view_name: MYVIEW
@@ -48,20 +47,30 @@ body:
       value: T
     - kind: ref
       value: LANG
-      array_dim: Tree(Token('RULE', 'array_dim'), [Token('__ANON_1', '#OFFSET.#OFFSET:#OFFSET
-        + 5')])
+      array_dim: (#OFFSET.#OFFSET:#OFFSET + 5)
     - kind: literal
       value: 35
     - kind: ref
       value: T
     - kind: literal
       value: <== LANG (1:6) AFTER READ
-  -
   - statement_type: ASSIGN
-    target: '#OFFSET'
+    target:
+      kind: ref
+      value: LANG
+      array_dim: '1.1'
+    value:
+      kind: literal
+      value: '***'
+    rounded: false
+  - statement_type: ASSIGN
+    target:
+      kind: ref
+      value: '#OFFSET'
     value:
       kind: literal
       value: 2
+    rounded: false
   - statement_type: WRITE
     items:
     - kind: literal
@@ -70,7 +79,7 @@ body:
       value: T
     - kind: ref
       value: LANG
-      array_dim: Tree(Token('RULE', 'array_dim'), [Token('__ANON_1', '1.1')])
+      array_dim: (1.1)
     - kind: literal
       value: 35
     - kind: ref
@@ -79,9 +88,25 @@ body:
       value: <== LANG (1.1) AFTER TWO ASSIGNS
     - kind: literal
       value: /
-  -
-  -
-  -
+    - kind: literal
+      value: 5
+    - kind: ref
+      value: T
+    - kind: ref
+      value: LANG
+      array_dim: (#OFFSET.#OFFSET:#OFFSET + 4)
+    - kind: literal
+      value: 35
+    - kind: ref
+      value: T
+    - kind: literal
+      value: <== LANG (2:6) AFTER TWO ASSIGNS
+  - statement_type: UPDATE
+  - statement_type: GET
+    view_name: MYVIEW2
+    arguments:
+    - kind: ref
+      value: '*ISN'
   - statement_type: WRITE
     items:
     - kind: literal
@@ -90,7 +115,7 @@ body:
       value: T
     - kind: ref
       value: MYVIEW2.LANG
-      array_dim: Tree(Token('RULE', 'array_dim'), [Token('__ANON_1', '1:6')])
+      array_dim: (1:6)
     - kind: literal
       value: 35
     - kind: ref
@@ -106,7 +131,10 @@ body:
     - kind: literal
       value: '-------------------------------------------------------'
   - statement_type: ASSIGN
-    target: '#OFFSET'
+    target:
+      kind: ref
+      value: '#OFFSET'
     value:
       kind: literal
       value: 1
+    rounded: false

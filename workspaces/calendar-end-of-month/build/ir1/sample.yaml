@@ -10,23 +10,6 @@ symbols:
       length: 2
       storage: binary
     redefine_offset: 0
-  NAME:
-    id: sym.local.name
-    name: NAME
-    scope: local
-    semantic_type:
-      base: string
-      length: 0
-      storage: alphanumeric
-    redefine_offset: 0
-  LANG:
-    id: sym.local.lang
-    name: LANG
-    scope: local
-    semantic_type:
-      base: unknown
-      storage: '1:6'
-    redefine_offset: 0
 operations:
 - op: query_iteration
   id: loop.read_001
@@ -41,15 +24,25 @@ operations:
       op: literal
       value: SMITH
   cardinality: many
-  on_empty: []
   body:
+  - op: assign
+    target_id: sym.unresolved.lang
+    expr:
+      op: literal
+      value: '***'
+    rounded: false
   - op: assign
     target_id: sym.local.offset
     expr:
       op: literal
       value: 2
+    rounded: false
+  - op: entity_update
+    target_loop_id: loop.read_001
+    entity: MYVIEW
   - op: assign
     target_id: sym.local.offset
     expr:
       op: literal
       value: 1
+    rounded: false

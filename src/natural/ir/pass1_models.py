@@ -67,6 +67,10 @@ class SubroutineBlock(Pass1Node):
     body: List[Any] = Field(default_factory=list)
 
 
+class OnErrorBlock(Pass1Node):
+    body: List[Any] = Field(default_factory=list)
+
+
 class Pass1Module(BaseModel):
     module_name: str
     statements: List[Any] = Field(default_factory=list)

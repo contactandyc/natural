@@ -32,6 +32,11 @@ class SemanticNode(BaseModel):
     provenance: Optional[Provenance] = None
 
 
+class SemanticSubstring(SemanticNode):
+    start: "SemanticExpression"
+    length: Optional["SemanticExpression"] = None
+
+
 class SemanticExpression(SemanticNode):
     op: str
     symbol_id: Optional[str] = None
@@ -39,6 +44,11 @@ class SemanticExpression(SemanticNode):
     lhs: Optional["SemanticExpression"] = None
     rhs: Optional["SemanticExpression"] = None
     items: List["SemanticExpression"] = Field(default_factory=list)
+    substring: Optional[SemanticSubstring] = None
+
+
+SemanticSubstring.model_rebuild()
+SemanticExpression.model_rebuild()
 
 
 class SemanticStatement(SemanticNode):
@@ -48,8 +58,10 @@ class SemanticStatement(SemanticNode):
 class AssignOp(SemanticStatement):
     op: str = "assign"
     target_id: str
+    target_substring: Optional[SemanticSubstring] = None
     expr: SemanticExpression
     edit_mask: Optional[str] = None
+    rounded: bool = False
 
 
 class BranchOp(SemanticStatement):
@@ -106,12 +118,27 @@ class CompressOp(SemanticStatement):
     with_delimiters: bool = False
 
 
+class SeparateOp(SemanticStatement):
+    op: str = "separate"
+    source: SemanticExpression
+    target_ids: List[str] = Field(default_factory=list)
+    delimiter: Optional[SemanticExpression] = None
+    ignore_remainder: bool = False
+
+
 class ExamineOp(SemanticStatement):
     op: str = "examine"
     target_id: str
-    pattern: SemanticExpression
+    pattern: Optional[SemanticExpression] = None
     replace_with: Optional[SemanticExpression] = None
     giving_number_id: Optional[str] = None
+    translate_case: Optional[str] = None  # "UPPER" or "LOWER"
+
+
+class MoveAllOp(SemanticStatement):
+    op: str = "move_all"
+    target_id: str
+    fill_char: SemanticExpression
 
 
 class ResetOp(SemanticStatement):
@@ -175,6 +202,9 @@ class SubroutineBlockOp(BaseModel):
     name: str
     operations: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
 
+class OnErrorOp(SemanticStatement):
+    op: str = "on_error"
+    body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
 
 class SemanticModule(BaseModel):
     ir_version: str = "1.0"

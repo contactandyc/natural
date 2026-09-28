@@ -1,7 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
-# SPDX-License-Identifier: Apache-2.0
-# Maintainer: Andy Curtis <contactandyc@gmail.com>
-
 from .models import (
     AssignStatement,
     CallnatStatement,
@@ -25,15 +21,18 @@ from .models import (
     LoopStatement,
     MoveStatement,
     NaturalModule,
+    OnErrorBlockStatement,
     PerformStatement,
     PrintStatement,
     ReadStatement,
     ReadWorkFileStatement,
     ResetStatement,
     ScopeType,
+    SeparateStatement,
     Statement,
     StoreStatement,
     SubroutineDefinition,
+    SubstringSpec,
     UpdateStatement,
     ViewDefinition,
     ViewField,
@@ -56,6 +55,7 @@ from .pass1_models import (
     NoneBranchBlock,
     DecideBlock,
     SubroutineBlock,
+    OnErrorBlock,
 )
 from .serializer import serialize_to_yaml
 
@@ -82,15 +82,18 @@ __all__ = [
     "LoopStatement",
     "MoveStatement",
     "NaturalModule",
+    "OnErrorBlockStatement",
     "PerformStatement",
     "PrintStatement",
     "ReadStatement",
     "ReadWorkFileStatement",
     "ResetStatement",
     "ScopeType",
+    "SeparateStatement",
     "Statement",
     "StoreStatement",
     "SubroutineDefinition",
+    "SubstringSpec",
     "UpdateStatement",
     "ViewDefinition",
     "ViewField",
@@ -112,4 +115,5 @@ __all__ = [
     "NoneBranchBlock",
     "DecideBlock",
     "SubroutineBlock",
+    "OnErrorBlock",
 ]

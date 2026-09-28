@@ -373,3 +373,115 @@ Added 8 end-to-end test fixtures covering:
 
 * **YAML Pruning:** Added recursive empty collection pruning in `serialize_to_yaml()` to strip empty lists and empty dicts from emitted IR files.
 * **Freight Calc Rebuild:** Updated generated `ratecalc.yaml` (IR0/IR1) to omit empty collections, and updated `ratecalc.py` to match the new emitter structure.
+
+
+--- 
+
+---
+
+### Status Overview Across the 5 Target Categories
+
+| Category | Status | Completion | Summary |
+| --- | --- | --- | --- |
+| **1. Database Access & Adabas Transactions** | In Progress | ~35% | Basic `FIND`, `READ`, `GET *ISN`, `UPDATE`, `STORE`, and `DELETE` work; transactions and loop hooks remain unhandled. |
+| **2. Arithmetic & Data Movement Operations** | **Completed** | **95%** | `SEPARATE`, `EXAMINE TRANSLATE`, `MOVE ALL`, substring slice writes, compound math, and `ROUNDED` arithmetic are fully functional and tested. |
+| **3. Program Invocation, Execution & Functions** | Pending | ~20% | `PERFORM` (subroutines) and `CALLNAT` (subprograms) work; `FETCH`, `CALL`, `STOP`, `TERMINATE`, and user functions are unbuilt. |
+| **4. Data Types, Redefinitions & Adabas Features** | In Progress | ~40% | Scalar `REDEFINE` (property getters/setters) and basic date edit masks work; periodic groups (`PE`), multiple fields (`MU`), dynamic arrays, and numeric masks are pending. |
+| **5. Compiler Architecture & CLI Ergonomics** | **Completed** | **95%** | Unified `ProjectBuilder`, clean CLI command forwarding (`build.sh run`), `ON ERROR` exception wrappers, and all sample workspaces compile cleanly. |
+
+---
+
+### Changes for https://share.gemini.google/j6xMU7MBqGwy
+
+#### Category 2: Arithmetic & Data Movement Operations
+
+* **`SEPARATE`:** Added `SeparateStatement` and `SeparateOp`, parsing source strings, delimiters, and target lists. Lowers directly to Python's `str.split(delimiter, maxsplit)` with target variable unpacking. Tested via `tests/fixtures/separate.test`.
+* **`EXAMINE TRANSLATE`:** Added case translation parsing (`TRANSLATE INTO UPPER/LOWER CASE`) in `StringOpParser`, lowering to Python `.upper()` and `.lower()`. Tested via `tests/fixtures/examine_translate.test`.
+* **`MOVE ALL`:** Added string/memory block filling via `MoveAllOp`. Computes target variable length from symbol metadata and lowers to character repetition: `ctx.field = str(char) * length`. Tested via `tests/fixtures/move_all_and_substring.test`.
+* **Substring Indexing & Slice Assignments:**
+* Unified `ExpressionParser` bracket grammar (`VAR_NAME "(" RAW_BRACKET ")"`) to resolve ambiguities between slices `(1:4)`, scalar indices `(1)`, and composite indices `(1.1)`.
+* Added support for substring write targets (`#VAR(start:len) := '...'`), lowering to 0-based offset slice splices: `ctx.var[:s] + val + ctx.var[e:]`.
+
+
+* **Compound Arithmetic & `ROUNDED`:**
+* Expanded `MathParser` to accept multi-operand statements (`ADD a b c TO total`).
+* Implemented `ROUNDED` execution semantics, lowering decimal math to Python's `Decimal.quantize(..., rounding=ROUND_HALF_UP)` and integer math to `int(round(...))` or `int(a / b)`. Tested via `tests/fixtures/compound_math_rounded.test`.
+
+
+
+#### Category 5: Compiler Architecture & CLI Ergonomics
+
+* **Unified Build Orchestration (`ProjectBuilder`):** Eliminated divergent compilation logic between `natural/cli.py` and `natural/orchestrator/builder.py`. `cli.py build` now delegates directly to `ProjectBuilder.compile_workspace()`.
+* **CLI Forwarding & Parameter Normalization:**
+* Simplified `./build.sh` so commands run directly without redundant subcommands (e.g. `./build.sh run <workspace> <module>` instead of `./build.sh run run ...`).
+* Updated `emit_main_block` in `PythonEmitter` to accept both POSIX dashed flags (`--ship-class`) and Pythonic snake_case flags (`--ship_class`).
+
+
+* **ORM Fallback Model Generation:** Fixed dynamic model fallbacks in `target_orm.py` to prevent SQLAlchemy mapper crashes on internal attributes like `__path__` by rejecting dunder lookups and providing default primary keys.
+* **Error Handling (`ON ERROR`):**
+* Added `on_error_block` to `pass1_island.lark`, `OnErrorBlockStatement` to IR0, and `OnErrorOp` to IR1.
+* Lowered modules with error handlers into enclosing `try: ... except Exception as natural_err:` structures. Lowered `ESCAPE ROUTINE` inside handlers to immediate context returns (`return ctx`). Tested via `tests/fixtures/on_error.test`.
+
+
+* **Workspace Validation:**
+* `workspaces/error-test/PAYCALC.nsp`: Resolves unqualified DDM fields (`SALARY`, `NAME`) via active query loop scopes.
+* `workspaces/calendar-end-of-month/`: Resolved line continuations (`/`), complex `WRITE` tabs (`5T`, `35T`), and date redefinitions across `EOM1.nsp`, `EOM2.nsp`, and `SAMPLE.nsp`.
+
+
+
+---
+
+### What Needs To Be Done
+
+#### Category 1: Database Access & Adabas Transactions
+
+* **Transaction Demarcation:**
+* Add AST/IR nodes for `END TRANSACTION` and `BACKOUT TRANSACTION`.
+* Lower to `session.commit()` and `session.rollback()`.
+
+
+* **Loop Control Hooks:**
+* Parse `AT START OF DATA`, `AT END OF DATA`, and `AT BREAK (field)` blocks inside query iteration loops.
+* Lower to loop boundary checks (e.g., executing on `loop_idx == 1`, tracking previous field values for break triggers, or post-loop execution).
+
+
+* **Search Criteria & Multi-Field Descriptors:**
+* Extend `find_parser.py` beyond single equality (`WITH field = val`) to support boolean descriptor queries: `WITH CLASS = #A AND ZONE = #B`, ranges (`THRU`), and superdescriptors.
+
+
+* **Read Variants:**
+* Add parsing and execution for `HISTOGRAM` (reading field descriptors/counts without fetching full database records) and `GET SAME` (re-reading the active ISN with record hold).
+
+
+
+#### Category 3: Program Invocation, Modular Execution & Functions
+
+* **Program Invocations (`FETCH`, `CALL`):**
+* `FETCH` and `FETCH RETURN`: Support transferring control to standalone executable programs (`.nsp`), passing state via a shared context or global data area.
+* `CALL`: Support external non-Natural foreign calls (e.g., invoking legacy C or external shared libraries).
+
+
+* **User-Defined Functions:**
+* Parse `DEFINE FUNCTION ... RETURNS ...` blocks.
+* Lower functions to standalone Python utility methods with typed returns and inline caller invocation in `ExpressionParser`.
+
+
+* **Program Termination:**
+* Map `STOP` (abrupt halt of execution) and `TERMINATE` (session shutdown) to `sys.exit()` or top-level workflow returns.
+
+
+
+#### Category 4: Data Types, Redefinitions & Adabas Features
+
+* **Periodic Groups (`PE`) & Multiple-Value Fields (`MU`):**
+* Support array indices on Adabas view fields (`LANG(1:6)` or dynamic offsets `LANG(#OFFSET:#OFFSET + 5)`).
+* Map nested periodic groups to SQLAlchemy relationship tables or JSON/Array column collections in `ORMEmitter`.
+
+
+* **Dynamic Variables & Memory Allocation:**
+* Support dynamic alphanumeric types: `(A) DYNAMIC`.
+* Implement array allocation statements: `EXPAND ARRAY`, `REDUCE ARRAY`, and `RESIZE ARRAY`.
+
+
+* **Numeric & Currency Edit Masks:**
+* Extend `PythonEmitter._convert_edit_mask()` beyond date patterns (`YYYYMMDD`) to parse numeric formatting strings: `(EM=ZZZ,ZZ9.99-)`, leading zero suppressions, and currency indicators.

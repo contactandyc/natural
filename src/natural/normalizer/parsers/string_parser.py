@@ -2,7 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
-from natural.ir.models import CompressStatement, ExamineStatement, ResetStatement, Expression
+from natural.ir.models import (
+    CompressStatement,
+    ExamineStatement,
+    ResetStatement,
+    SeparateStatement,
+)
 from natural.normalizer.parsers.expression_parser import ExpressionParser
 
 
@@ -11,19 +16,27 @@ class StringOpParser:
         self.expr_parser = ExpressionParser()
         self.compress_pattern = re.compile(
             r"^\s*COMPRESS\s+(.+?)\s+INTO\s+([*#\+A-Za-z0-9\-_\.]+)(?:\s+(WITH\s+ALL\s+DELIMITERS?|WITH\s+DELIMITERS?)\s+(.+?))?\s*$",
-            re.IGNORECASE
+            re.IGNORECASE,
         )
         self.examine_replace = re.compile(
             r"^\s*EXAMINE\s+(.+?)\s+FOR\s+(.+?)\s+REPLACE\s+(?:FIRST\s+)?WITH\s+(.+?)\s*$",
-            re.IGNORECASE
+            re.IGNORECASE,
         )
         self.examine_count = re.compile(
             r"^\s*EXAMINE\s+(.+?)\s+FOR\s+(.+?)\s+GIVING\s+NUMBER\s+(?:IN\s+)?(.+?)\s*$",
-            re.IGNORECASE
+            re.IGNORECASE,
+        )
+        self.examine_translate = re.compile(
+            r"^\s*EXAMINE\s+(?:FULL\s+)?(?:VALUE\s+OF\s+)?(.+?)\s+TRANSLATE\s+INTO\s+(UPPER|LOWER)(?:\s+CASE)?\s*$",
+            re.IGNORECASE,
+        )
+        self.separate_pattern = re.compile(
+            r"^\s*SEPARATE\s+(.+?)\s+INTO\s+(.+?)(?:\s+WITH\s+DELIMITERS?\s+(.+?))?(?:\s+(IGNORE\s+REMAINDER))?\s*$",
+            re.IGNORECASE,
         )
         self.reset_pattern = re.compile(
             r"^\s*RESET\s+(INITIAL\s+)?(.+)$",
-            re.IGNORECASE
+            re.IGNORECASE,
         )
 
     def parse_compress(self, raw_statement: str) -> CompressStatement:
@@ -40,17 +53,45 @@ class StringOpParser:
         operands = [self.expr_parser.parse(op) for op in operands_raw]
         target = self.expr_parser.parse(target_raw)
         delim = self.expr_parser.parse(delim_val_raw.strip()) if delim_val_raw else None
-        with_all = bool(delim_clause and "ALL" in delim_clause.upper())
 
         return CompressStatement(
             operands=operands,
             target=target,
             delimiter=delim,
-            with_delimiters=bool(delim_clause)
+            with_delimiters=bool(delim_clause),
+        )
+
+    def parse_separate(self, raw_statement: str) -> SeparateStatement:
+        clean = re.sub(r"/\*.*$", "", raw_statement).strip()
+        m = self.separate_pattern.match(clean)
+        if not m:
+            raise ValueError(f"Invalid SEPARATE syntax: {raw_statement}")
+
+        source_raw = m.group(1).strip()
+        targets_raw = m.group(2).strip().split()
+        delim_raw = m.group(3)
+        ignore_remainder = bool(m.group(4))
+
+        source = self.expr_parser.parse(source_raw)
+        targets = [self.expr_parser.parse(t) for t in targets_raw if t.strip()]
+        delim = self.expr_parser.parse(delim_raw.strip()) if delim_raw else None
+
+        return SeparateStatement(
+            source=source,
+            targets=targets,
+            delimiter=delim,
+            ignore_remainder=ignore_remainder,
         )
 
     def parse_examine(self, raw_statement: str) -> ExamineStatement:
         clean = re.sub(r"/\*.*$", "", raw_statement).strip()
+
+        m_trans = self.examine_translate.match(clean)
+        if m_trans:
+            target = self.expr_parser.parse(m_trans.group(1).strip())
+            case_type = m_trans.group(2).upper()
+            return ExamineStatement(target=target, translate_case=case_type)
+
         m_rep = self.examine_replace.match(clean)
         if m_rep:
             target = self.expr_parser.parse(m_rep.group(1).strip())

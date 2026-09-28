@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 
+import re
 from lark import Lark, Transformer
 from natural.ir.models import PrintStatement, WriteStatement, InputStatement, Expression
 from natural.normalizer.parsers.expression_parser import ExpressionParser
@@ -20,21 +21,16 @@ io_grammar = r"""
                | NEWLINE_SPLIT   -> newline
                | WRITE_TAB       -> write_tab
 
-    // Handles '-' (55) -> repeats string N times
     str_with_repeat: STRING "(" NUMBER ")"
-
-    // Captures modifiers like (AD=M, EM=YYYY)
     modifier: "(" /[a-zA-Z0-9_]+=[^)]+/i ")"
 
-    // Links array dimensions directly to the variable name
-    var_ref: VAR_NAME array_dim?
+    var_ref: VAR_NAME (PAREN_DIM | "(" /[^)]+/ ")")?
 
-    array_dim: "(" /[^)]+/ ")"
+    PAREN_DIM: /\s*\([^)]+\)/
 
-    VAR_NAME: /[*#\+][A-Z0-9\-_]+((\.|\/)[A-Z0-9\-_]+)*/ | /[A-Z0-9\-_]+(\.|\/)[A-Z0-9\-_]+/ | /[A-Z][A-Z0-9\-_]*/
+    VAR_NAME: /[*#\+][A-Za-z0-9\-_]+((\.|\/)[A-Za-z0-9\-_]+)*/ | /[A-Za-z0-9\-_]+(\.|\/)[A-Za-z0-9\-_]+/ | /[A-Za-z][A-Za-z0-9\-_]*/
 
     NEWLINE_SPLIT: "/"
-
     WRITE_TAB.2: /\d+T/i
     NUMBER.2: /\d+(\.\d+)?/
     STRING: /'[^']*'/ | /"[^"]*"/
@@ -43,11 +39,8 @@ io_grammar = r"""
     %ignore WS
 """
 
-class IOTransformer(Transformer):
-    def __init__(self):
-        super().__init__()
-        self.expr_parser = ExpressionParser()
 
+class IOTransformer(Transformer):
     def modifier(self, tokens):
         return None
 
@@ -66,7 +59,7 @@ class IOTransformer(Transformer):
 
     def var_ref(self, tokens):
         var_name = str(tokens[0])
-        dim = str(tokens[1]) if len(tokens) > 1 else None
+        dim = str(tokens[1]).strip() if len(tokens) > 1 and tokens[1] is not None else None
         return Expression(kind="ref", value=var_name, array_dim=dim)
 
     def newline(self, tokens):
@@ -88,11 +81,13 @@ class IOTransformer(Transformer):
 
         raise ValueError(f"Unknown IO command: {cmd}")
 
+
 class IOParser:
     def __init__(self):
         self.parser = Lark(io_grammar, parser="lalr")
         self.transformer = IOTransformer()
 
     def parse(self, raw_clause: str):
-        tree = self.parser.parse(raw_clause)
+        clean = re.sub(r"/\*.*$", "", raw_clause).strip()
+        tree = self.parser.parse(clean)
         return self.transformer.transform(tree)

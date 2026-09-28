@@ -3,12 +3,30 @@
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
 import re
+from typing import Any, List, Optional, Union
+
 from natural.ir.pass1_models import (
-    Pass1Module, FindBlock, DefineDataBlock,
-    RawStatement, IfBlock, RepeatBlock, ReadBlock, DecideBlock,
-    ForBlock, SubroutineBlock, ReadWorkBlock
+    Pass1Module,
+    Pass1Node,
+    FindBlock,
+    DefineDataBlock,
+    RawStatement,
+    IfBlock,
+    RepeatBlock,
+    ReadBlock,
+    DecideBlock,
+    ForBlock,
+    SubroutineBlock,
+    ReadWorkBlock,
+    OnErrorBlock,
 )
-from natural.ir.models import NaturalModule, PerformStatement
+from natural.ir.models import (
+    NaturalModule,
+    PerformStatement,
+    OnErrorBlockStatement,
+    Statement,
+    DataAreaRef,
+)
 from natural.normalizer.parsers.find_parser import FindParser
 from natural.normalizer.parsers.data_parser import DataBlockParser
 from natural.normalizer.parsers.if_parser import IfParser
@@ -46,112 +64,151 @@ class Pass2Dispatcher:
         self.db_parser = DatabaseOpParser()
         self.work_parser = WorkFileParser()
 
+    def _dispatch_children(self, children_nodes: List[Any]) -> List[Statement]:
+        """Dispatches child AST nodes and flattens statement sequences."""
+        statements: List[Statement] = []
+        for child in children_nodes:
+            if child is None:
+                continue
+            dispatched = self.dispatch(child)
+            if dispatched is None:
+                continue
+            if isinstance(dispatched, list):
+                statements.extend(dispatched)
+            elif isinstance(dispatched, Statement):
+                statements.append(dispatched)
+        return statements
+
     def lower_module(self, pass1_ast: Pass1Module) -> NaturalModule:
         ir0_module = NaturalModule(name=pass1_ast.module_name)
 
-        for statement in pass1_ast.statements:
-            ir0_stmt = self.dispatch(statement)
-            if ir0_stmt is not None:
-                if isinstance(statement, SubroutineBlock):
-                    ir0_module.subroutines[statement.name] = (
-                        ir0_stmt if isinstance(ir0_stmt, list) else [ir0_stmt]
-                    )
-                elif isinstance(ir0_stmt, list):
-                    ir0_module.data_areas.extend(ir0_stmt)
-                else:
-                    ir0_module.body.append(ir0_stmt)
+        for stmt_node in pass1_ast.statements:
+            if isinstance(stmt_node, DefineDataBlock):
+                areas = self.data_parser.parse(stmt_node.raw_content)
+                ir0_module.data_areas.extend(areas)
+            elif isinstance(stmt_node, SubroutineBlock):
+                ir0_module.subroutines[stmt_node.name] = self._dispatch_children(stmt_node.body)
+            else:
+                dispatched = self.dispatch(stmt_node)
+                if dispatched is None:
+                    continue
+                if isinstance(dispatched, list):
+                    ir0_module.body.extend(dispatched)
+                elif isinstance(dispatched, Statement):
+                    ir0_module.body.append(dispatched)
 
         return ir0_module
 
-    def dispatch(self, node):
+    def dispatch(self, node: Pass1Node) -> Optional[Union[Statement, List[Statement]]]:
         if isinstance(node, FindBlock):
-            find_stmt = self.find_parser.parse(node.raw_clause)
-            find_stmt.label = node.label
-            find_stmt.body = [self.dispatch(child) for child in node.body if child is not None]
-            return find_stmt
+            stmt = self.find_parser.parse(node.raw_clause)
+            stmt.label = node.label
+            stmt.body = self._dispatch_children(node.body)
+            return stmt
 
-        elif isinstance(node, ReadBlock):
-            read_stmt = self.read_parser.parse(node.raw_clause)
-            read_stmt.label = node.label
-            read_stmt.body = [self.dispatch(child) for child in node.body if child is not None]
-            return read_stmt
+        if isinstance(node, ReadBlock):
+            stmt = self.read_parser.parse(node.raw_clause)
+            stmt.label = node.label
+            stmt.body = self._dispatch_children(node.body)
+            return stmt
 
-        elif isinstance(node, ReadWorkBlock):
-            work_stmt = self.work_parser.parse_read_clause(node.raw_clause, label=node.label)
-            work_stmt.body = [self.dispatch(child) for child in node.body if child is not None]
-            return work_stmt
+        if isinstance(node, ReadWorkBlock):
+            stmt = self.work_parser.parse_read_clause(node.raw_clause, label=node.label)
+            stmt.body = self._dispatch_children(node.body)
+            return stmt
 
-        elif isinstance(node, IfBlock):
-            if_stmt = self.if_parser.parse(node.raw_clause)
-            if_stmt.then_branch = [self.dispatch(child) for child in node.body if child is not None]
-            if_stmt.else_branch = [self.dispatch(child) for child in node.else_body if child is not None]
-            return if_stmt
+        if isinstance(node, IfBlock):
+            stmt = self.if_parser.parse(node.raw_clause)
+            stmt.then_branch = self._dispatch_children(node.body)
+            stmt.else_branch = self._dispatch_children(node.else_body)
+            return stmt
 
-        elif isinstance(node, RepeatBlock):
-            repeat_stmt = self.loop_parser.parse(node.raw_clause)
-            repeat_stmt.label = node.label
-            repeat_stmt.body = [self.dispatch(child) for child in node.body if child is not None]
-            return repeat_stmt
+        if isinstance(node, RepeatBlock):
+            stmt = self.loop_parser.parse(node.raw_clause)
+            stmt.label = node.label
+            stmt.body = self._dispatch_children(node.body)
+            return stmt
 
-        elif isinstance(node, ForBlock):
-            for_stmt = self.for_parser.parse(node.raw_clause, label=node.label)
-            for_stmt.body = [self.dispatch(child) for child in node.body if child is not None]
-            return for_stmt
+        if isinstance(node, ForBlock):
+            stmt = self.for_parser.parse(node.raw_clause, label=node.label)
+            stmt.body = self._dispatch_children(node.body)
+            return stmt
 
-        elif isinstance(node, SubroutineBlock):
-            return [self.dispatch(child) for child in node.body if child is not None]
+        if isinstance(node, OnErrorBlock):
+            return OnErrorBlockStatement(body=self._dispatch_children(node.body))
 
-        elif isinstance(node, DefineDataBlock):
-            return self.data_parser.parse(node.raw_content)
-
-        elif isinstance(node, RawStatement):
-            text = node.text.strip().upper()
-
-            if text.startswith("PERFORM "):
-                sub_name = node.text.strip().split()[1].strip().upper()
-                return PerformStatement(subroutine_name=sub_name)
-            elif text.startswith(("UPDATE", "DELETE", "STORE", "GET ")):
-                try:
-                    return self.db_parser.parse(node.text)
-                except ValueError:
-                    pass
-            elif text.startswith("WRITE WORK "):
-                return self.work_parser.parse_write(node.text)
-            elif text.startswith("CLOSE WORK "):
-                return self.work_parser.parse_close(node.text)
-            elif text.startswith("COMPRESS "):
-                return self.string_parser.parse_compress(node.text)
-            elif text.startswith("EXAMINE "):
-                return self.string_parser.parse_examine(node.text)
-            elif text.startswith("RESET "):
-                return self.string_parser.parse_reset(node.text)
-            elif text.startswith("MOVE "):
-                return self.move_parser.parse(node.text)
-            elif text.startswith("ESCAPE "):
-                return self.escape_parser.parse(node.text)
-            elif text.startswith(("ADD ", "SUBTRACT ", "MULTIPLY ", "DIVIDE ")):
-                return self.math_parser.parse(node.text)
-            elif text.startswith("CALLNAT "):
-                return self.callnat_parser.parse(node.text)
-            elif text.startswith(("PRINT ", "WRITE ", "INPUT ")):
-                return self.io_parser.parse(node.text)
-            elif text.startswith("ASSIGN ") or text.startswith("COMPUTE ") or ":=" in text or "=" in text:
-                try:
-                    return self.assign_parser.parse(node.text)
-                except ValueError:
-                    pass
-
-        elif isinstance(node, DecideBlock):
+        if isinstance(node, DecideBlock):
             decide_stmt = self.decide_parser.parse(node.raw_clause, decide_type=node.decide_type)
-
             for branch_node in node.branches:
-                branch_stmt = self.decide_parser.parse_branch(branch_node.raw_clause)
-                branch_stmt.statements = [self.dispatch(child) for child in branch_node.body if child is not None]
-                decide_stmt.branches.append(branch_stmt)
-
+                branch = self.decide_parser.parse_branch(branch_node.raw_clause)
+                branch.statements = self._dispatch_children(branch_node.body)
+                decide_stmt.branches.append(branch)
             if node.none_branch:
-                decide_stmt.none_branch = [self.dispatch(child) for child in node.none_branch.body if child is not None]
-
+                decide_stmt.none_branch = self._dispatch_children(node.none_branch.body)
             return decide_stmt
+
+        if isinstance(node, RawStatement):
+            return self._dispatch_raw_statement(node.text)
+
+        return None
+
+    def _dispatch_raw_statement(self, raw_text: str) -> Optional[Union[Statement, List[Statement]]]:
+        text = raw_text.strip()
+        upper = text.upper()
+
+        if upper.startswith("PERFORM "):
+            sub_name = text.split()[1].strip().upper()
+            return PerformStatement(subroutine_name=sub_name)
+
+        if upper.startswith(("UPDATE", "DELETE", "STORE", "GET ")):
+            try:
+                return self.db_parser.parse(text)
+            except ValueError:
+                pass
+
+        if upper.startswith("WRITE WORK "):
+            return self.work_parser.parse_write(text)
+
+        if upper.startswith("CLOSE WORK "):
+            return self.work_parser.parse_close(text)
+
+        if upper.startswith("COMPRESS "):
+            return self.string_parser.parse_compress(text)
+
+        if upper.startswith("SEPARATE "):
+            return self.string_parser.parse_separate(text)
+
+        if upper.startswith("EXAMINE "):
+            return self.string_parser.parse_examine(text)
+
+        if upper.startswith("RESET "):
+            return self.string_parser.parse_reset(text)
+
+        if upper.startswith("MOVE "):
+            return self.move_parser.parse(text)
+
+        if upper.startswith("ESCAPE "):
+            return self.escape_parser.parse(text)
+
+        if upper.startswith(("ADD ", "SUBTRACT ", "MULTIPLY ", "DIVIDE ")):
+            return self.math_parser.parse(text)
+
+        if upper.startswith("CALLNAT "):
+            return self.callnat_parser.parse(text)
+
+        if upper.startswith(("PRINT ", "WRITE ", "INPUT ")):
+            return self.io_parser.parse(text)
+
+        if upper.startswith(("ASSIGN ", "COMPUTE ")) or ":=" in upper or (
+                "=" in upper
+                and not upper.startswith(("IF ", "FIND ", "READ ", "WRITE ", "PRINT "))
+                and not "<=" in upper
+                and not ">=" in upper
+                and not "==" in upper
+        ):
+            try:
+                return self.assign_parser.parse(text)
+            except Exception:
+                pass
 
         return None

@@ -1,0 +1,30 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #FIELD_A (A10)
+1 #FIELD_B (A10)
+1 #SLICE   (A5)
+END-DEFINE
+MOVE ALL '*' TO #FIELD_A
+#SLICE := #FIELD_B(1:4)
+#FIELD_A(1:4) := 'INIT'
+
+=== PYTHON ===
+class MoveAllAndSubstringContext:
+    def __init__(self):
+        self.field_a = ""
+        self.field_b = ""
+        self.slice = ""
+
+def execute_move_all_and_substring(ctx: MoveAllAndSubstringContext, session):
+    ctx.field_a = str('*') * 10
+    ctx.slice = ctx.field_b[(1 - 1):(1 - 1) + 4]
+    ctx.field_a = ctx.field_a[:(1 - 1)] + str('INIT') + (ctx.field_a[((1 - 1) + 4):] if ((1 - 1) + 4) is not None else '')
+    return ctx
+
+=== EXECUTE ===
+- input:
+    field_a: "1234567890"
+    field_b: "ABCDEFGHIJ"
+  expected:
+    slice: "ABCD"
+    field_a: "INIT******"

@@ -1,4 +1,3 @@
-from dataclasses import dataclass, field
 from decimal import Decimal
 from datetime import date, datetime, timedelta
 
@@ -7,17 +6,17 @@ class Eom2Context:
         self.date = date.today()
         self.t = ""
         self.d = date.today()
-    
+
     @property
     def dd(self) -> int:
         sub = self.t[0:2]
         return int(sub) if sub.isdigit() else 0
-    
+
     @dd.setter
     def dd(self, val: int):
         val_str = f'{int(val):02d}'
         self.t = self.t[:0] + val_str + self.t[2:]
-    
+
 def execute_eom2(ctx: Eom2Context, session):
     ctx.t = ctx.date.strftime('%d%m%Y')
     if (ctx.dd < 28):
@@ -32,28 +31,38 @@ def execute_eom2(ctx: Eom2Context, session):
 if __name__ == "__main__":
     import sys
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Standalone runner for execute_eom2")
-    parser.add_argument("--date", type=str, default=None, help="Initial value for --date")
-    parser.add_argument("--t", type=str, default=None, help="Initial value for --t")
-    parser.add_argument("--d", type=str, default=None, help="Initial value for --d")
+    parser.add_argument("--date", type=str, default=None, help="Initial value for date")
+    parser.add_argument("--t", type=str, default=None, help="Initial value for t")
+    parser.add_argument("--d", type=str, default=None, help="Initial value for d")
     args = parser.parse_args()
     ctx = Eom2Context()
-    
+
     if args.date is not None:
         ctx.date = date.fromisoformat(args.date)
     if args.t is not None:
         ctx.t = args.t
     if args.d is not None:
         ctx.d = date.fromisoformat(args.d)
-    
+
+    class MockQuery(list):
+        def filter(self, *args, **kwargs):
+            return self
+        def limit(self, *args, **kwargs):
+            return self
+
     class MockSession:
         def query(self, *args, **kwargs):
-            return []
-    
+            return MockQuery()
+        def add(self, obj): pass
+        def delete(self, obj): pass
+        def flush(self):
+            pass
+
     session = MockSession()
     result = execute_eom2(ctx, session)
-    
+
     print(f"[execute_eom2] Execution complete:")
     for k, v in sorted(result.__dict__.items()):
         if not k.startswith("_"):

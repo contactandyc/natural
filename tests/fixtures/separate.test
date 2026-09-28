@@ -1,0 +1,38 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #CSV_LINE (A40)
+1 #COL1     (A10)
+1 #COL2     (A10)
+1 #COL3     (A10)
+END-DEFINE
+SEPARATE #CSV_LINE INTO #COL1 #COL2 #COL3 WITH DELIMITER ','
+
+=== PYTHON ===
+class SeparateContext:
+    def __init__(self):
+        self.csv_line = ""
+        self.col1 = ""
+        self.col2 = ""
+        self.col3 = ""
+
+def execute_separate(ctx: SeparateContext, session):
+    _parts = ctx.csv_line.split(str(','), -1)
+    ctx.col1 = _parts[0] if len(_parts) > 0 else ''
+    ctx.col2 = _parts[1] if len(_parts) > 1 else ''
+    ctx.col3 = _parts[2] if len(_parts) > 2 else ''
+    return ctx
+
+=== EXECUTE ===
+- input:
+    csv_line: "ALPHA,BETA,GAMMA"
+  expected:
+    col1: "ALPHA"
+    col2: "BETA"
+    col3: "GAMMA"
+
+- input:
+    csv_line: "ONE,TWO"
+  expected:
+    col1: "ONE"
+    col2: "TWO"
+    col3: ""

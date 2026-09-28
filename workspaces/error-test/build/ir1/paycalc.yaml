@@ -1,0 +1,78 @@
+ir_version: '1.0'
+module_id: mod.paycalc
+symbols:
+  '#INPUT-ID':
+    id: sym.parameter.input-id
+    name: '#INPUT-ID'
+    scope: parameter
+    semantic_type:
+      base: string
+      length: 8
+      storage: alphanumeric
+    redefine_offset: 0
+  '#BONUS':
+    id: sym.local.bonus
+    name: '#BONUS'
+    scope: local
+    semantic_type:
+      base: decimal
+      precision: 5
+      scale: 2
+      storage: packed_decimal
+    redefine_offset: 0
+  NAME:
+    id: sym.entity.emp-view.name
+    name: NAME
+    scope: entity_field
+    semantic_type:
+      base: string
+      length: 20
+      storage: alphanumeric
+    redefine_offset: 0
+  SALARY:
+    id: sym.entity.emp-view.salary
+    name: SALARY
+    scope: entity_field
+    semantic_type:
+      base: decimal
+      precision: 7
+      scale: 2
+      storage: packed_decimal
+    redefine_offset: 0
+operations:
+- op: query_iteration
+  id: loop.find_001
+  entity: EMP
+  natural_view: EMP-VIEW
+  predicate:
+    op: eq
+    lhs:
+      op: entity_field
+      symbol_id: sym.entity.emp-view.name
+    rhs:
+      op: ref
+      symbol_id: sym.parameter.input-id
+  cardinality: many
+  body:
+  - op: assign
+    target_id: sym.local.bonus
+    expr:
+      op: multiply
+      lhs:
+        op: ref
+        symbol_id: sym.entity.emp-view.salary
+      rhs:
+        op: literal
+        value: '0.10'
+    rounded: false
+  - op: assign
+    target_id: sym.local.bonus
+    expr:
+      op: add
+      lhs:
+        op: ref
+        symbol_id: sym.local.bonus
+      rhs:
+        op: literal
+        value: '50.00'
+    rounded: false

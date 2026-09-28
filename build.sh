@@ -26,7 +26,7 @@ fi
 PYTHON_VER="${PYTHON_VERSION:-3.11}"
 
 case "$COMMAND" in
-  install|build)
+  install)
     echo "--- Setting up Python $PYTHON_VER Virtual Environment ---"
     if [ ! -d "venv" ]; then
         python3 -m venv venv
@@ -42,15 +42,6 @@ case "$COMMAND" in
     mkdir -p "$HOME/.local/bin"
     ln -sf "$PWD/venv/bin/natural" "$HOME/.local/bin/natural"
     echo "✅ CLI linked to $HOME/.local/bin/natural. You can run 'natural' from anywhere!"
-    ;;
-
-  run)
-    if [ ! -d "venv" ]; then
-        echo "⚠️  Environment not found. Running install first..."
-        "$0" install
-    fi
-    source venv/bin/activate
-    python3 -m natural "$@"
     ;;
 
   test|bless)
@@ -107,7 +98,11 @@ case "$COMMAND" in
     ;;
 
   *)
-    echo "Usage: ./build.sh [install|build|run|test|bless|clean] [args...]" >&2
-    exit 1
+    # For build, run, parse, or any custom command, delegate directly to the CLI entrypoint
+    if [ ! -d "venv" ]; then
+        "$0" install
+    fi
+    source venv/bin/activate
+    python3 -m natural "$COMMAND" "$@"
     ;;
 esac

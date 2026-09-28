@@ -1,0 +1,35 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #N1    (P5.2)
+1 #N2    (P5.2)
+1 #N3    (P5.2)
+1 #TOTAL (P5.2)
+1 #QUOT  (P5.2)
+END-DEFINE
+ADD #N1 #N2 #N3 TO #TOTAL
+DIVIDE ROUNDED 3.0 INTO #TOTAL
+
+=== PYTHON ===
+from decimal import Decimal, ROUND_HALF_UP
+
+class CompoundMathRoundedContext:
+    def __init__(self):
+        self.n1 = Decimal('0')
+        self.n2 = Decimal('0')
+        self.n3 = Decimal('0')
+        self.total = Decimal('0')
+        self.quot = Decimal('0')
+
+def execute_compound_math_rounded(ctx: CompoundMathRoundedContext, session):
+    ctx.total = (((ctx.total + ctx.n1) + ctx.n2) + ctx.n3)
+    ctx.total = ((ctx.total / Decimal('3.0'))).quantize(Decimal('1e-2'), rounding=ROUND_HALF_UP)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    total: "0.00"
+    n1: "10.00"
+    n2: "20.00"
+    n3: "0.02"
+  expected:
+    total: "10.01"

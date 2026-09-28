@@ -20,6 +20,7 @@ from natural.ir.pass1_models import (
     DecideBranchBlock,
     NoneBranchBlock,
     SubroutineBlock,
+    OnErrorBlock,
 )
 
 
@@ -42,7 +43,7 @@ class IslandTransformer(Transformer):
         if not filtered:
             return None, "", []
 
-        non_body_types = (Pass1Module, RawStatement, FindBlock, ReadBlock, RepeatBlock, ForBlock, IfBlock, DecideBlock, ReadWorkBlock)
+        non_body_types = (Pass1Module, RawStatement, FindBlock, ReadBlock, RepeatBlock, ForBlock, IfBlock, DecideBlock, ReadWorkBlock, OnErrorBlock)
         if len(filtered) > 1 and isinstance(filtered[0], str) and not isinstance(filtered[1], non_body_types):
             label = str(filtered[0])
             clause = str(filtered[1])
@@ -66,6 +67,10 @@ class IslandTransformer(Transformer):
         label, clause, body = self._extract_label_and_clause(children)
         return ReadWorkBlock(label=label, raw_clause=clause, body=body)
 
+    def on_error_block(self, children) -> OnErrorBlock:
+        body = [c for c in children if c is not None]
+        return OnErrorBlock(body=body)
+
     def if_block(self, children) -> IfBlock:
         filtered = [c for c in children if c is not None]
         clause = str(filtered[0])
@@ -87,7 +92,7 @@ class IslandTransformer(Transformer):
         clause = ""
         body = []
 
-        non_body_types = (RawStatement, FindBlock, ReadBlock, RepeatBlock, ForBlock, IfBlock, DecideBlock, ReadWorkBlock)
+        non_body_types = (RawStatement, FindBlock, ReadBlock, RepeatBlock, ForBlock, IfBlock, DecideBlock, ReadWorkBlock, OnErrorBlock)
         for item in filtered:
             if isinstance(item, str) and not isinstance(item, non_body_types):
                 cleaned = item.strip()

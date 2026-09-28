@@ -4,7 +4,7 @@
 
 from decimal import Decimal
 from lark import Lark, Transformer
-from natural.ir.models import Expression
+from natural.ir.models import Expression, SubstringSpec
 
 expr_grammar = r"""
     ?start: logical_or
@@ -29,10 +29,13 @@ expr_grammar = r"""
            | DATE_LITERAL                            -> date_lit
            | BOOLEAN_LITERAL                         -> bool_lit
            | SYSTEM_VAR                              -> sys_var
-           | VAR_NAME array_dim?                     -> var_ref
+           | substring_func                          -> substring_expr
+           | VAR_NAME "(" RAW_BRACKET ")"            -> var_with_bracket
+           | VAR_NAME                                -> var_ref
            | "(" logical_or ")"
 
-    array_dim: "(" /[^)]+/ ")"
+    substring_func: "SUBSTRING"i "(" VAR_NAME "," expr ("," expr)? ")"
+    RAW_BRACKET.2: /[^)]+/
 
     LOGICAL_OR.2: "OR"i
     LOGICAL_AND.2: "AND"i
@@ -72,8 +75,35 @@ class ExpressionTransformer(Transformer):
 
     def var_ref(self, tokens):
         var_name = str(tokens[0])
-        dim = str(tokens[1]) if len(tokens) > 1 else None
-        return Expression(kind="ref", value=var_name, array_dim=dim)
+        return Expression(kind="ref", value=var_name)
+
+    def var_with_bracket(self, tokens):
+        var_name = str(tokens[0])
+        raw_content = str(tokens[1]).strip()
+
+        # Check for range slice syntax: (start:length) or (start:end)
+        if ":" in raw_content:
+            parts = raw_content.split(":", 1)
+            p1 = ExpressionParser().parse(parts[0].strip())
+            p2 = ExpressionParser().parse(parts[1].strip())
+            return Expression(
+                kind="ref",
+                value=var_name,
+                substring=SubstringSpec(start=p1, length=p2),
+            )
+
+        return Expression(kind="ref", value=var_name, array_dim=raw_content)
+
+    def substring_expr(self, tokens):
+        clause_tokens = tokens[0]
+        var_name = str(clause_tokens[0])
+        start = clause_tokens[1]
+        length = clause_tokens[2] if len(clause_tokens) > 2 else None
+        return Expression(
+            kind="ref",
+            value=var_name,
+            substring=SubstringSpec(start=start, length=length),
+        )
 
     def binary_expr(self, children):
         if len(children) == 3:
@@ -95,9 +125,10 @@ class ExpressionTransformer(Transformer):
 
 class ExpressionParser:
     def __init__(self):
-        self.parser = Lark(expr_grammar, parser="lalr")
-        self.transformer = ExpressionTransformer()
+        self._lark = Lark(expr_grammar, parser="lalr")
+        self._transformer = ExpressionTransformer()
 
     def parse(self, raw_expr: str) -> Expression:
-        tree = self.parser.parse(raw_expr)
-        return self.transformer.transform(tree)
+        clean = raw_expr.strip()
+        tree = self._lark.parse(clean)
+        return self._transformer.transform(tree)

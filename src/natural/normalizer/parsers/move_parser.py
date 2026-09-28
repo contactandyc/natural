@@ -1,11 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
 import re
 from natural.ir.models import MoveStatement
 from natural.normalizer.parsers.expression_parser import ExpressionParser
 
+
 class MoveParser:
     def __init__(self):
         self.expr_parser = ExpressionParser()
-        self.move_pattern = re.compile(r"^\s*MOVE\s+(?:EDITED\s+)?(.+?)\s+TO\s+(.+)$", re.IGNORECASE)
+        self.move_pattern = re.compile(
+            r"^\s*MOVE\s+(ALL\s+)?(?:EDITED\s+)?(.+?)\s+TO\s+(.+)$",
+            re.IGNORECASE,
+        )
         self.em_pattern = re.compile(r"^(.*?)\s*\(\s*EM\s*=\s*([^)]+)\s*\)$", re.IGNORECASE)
 
     def parse(self, raw_statement: str) -> MoveStatement:
@@ -14,8 +21,9 @@ class MoveParser:
         if not match:
             raise ValueError(f"Invalid MOVE syntax: {raw_statement}")
 
-        source_part = match.group(1).strip()
-        target_part = match.group(2).strip()
+        is_all = bool(match.group(1))
+        source_part = match.group(2).strip()
+        target_part = match.group(3).strip()
 
         source_mask, target_mask = None, None
 
@@ -34,5 +42,6 @@ class MoveParser:
         return MoveStatement(
             source=self.expr_parser.parse(source_part),
             target=self.expr_parser.parse(target_part),
-            edit_mask=final_mask
+            edit_mask=final_mask,
+            is_move_all=is_all,
         )

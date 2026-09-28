@@ -132,6 +132,7 @@ operations:
       rhs:
         op: ref
         symbol_id: sym.parameter.ship-weight
+    rounded: false
   - op: branch
     condition:
       op: gt
@@ -147,5 +148,6 @@ operations:
       expr:
         op: ref
         symbol_id: sym.entity.tariff-view.heavy-surcharge
+      rounded: false
     - op: break
       target_loop_id: loop.find_001

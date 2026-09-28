@@ -1,0 +1,51 @@
+name: PAYCALC
+data_areas:
+- name: EMP-P
+  scope: PARAMETER
+- name: INLINE_LOCAL
+  scope: LOCAL
+  inline_fields:
+  - level: 1
+    name: '#BONUS'
+    format:
+      kind: packed_decimal
+      raw_spec: P5.2
+      length: 5
+      digits: 5
+      decimals: 2
+body:
+- statement_type: FIND
+  view_name: EMP-VIEW
+  descriptor: NAME
+  operand:
+    kind: ref
+    value: '#INPUT-ID'
+  body:
+  - statement_type: ASSIGN
+    target:
+      kind: ref
+      value: '#BONUS'
+    value:
+      kind: binary_op
+      operator: '*'
+      left:
+        kind: ref
+        value: SALARY
+      right:
+        kind: literal
+        value: '0.10'
+    rounded: false
+  - statement_type: ASSIGN
+    target:
+      kind: ref
+      value: '#BONUS'
+    value:
+      kind: binary_op
+      operator: +
+      left:
+        kind: ref
+        value: '#BONUS'
+      right:
+        kind: literal
+        value: '50.00'
+    rounded: false

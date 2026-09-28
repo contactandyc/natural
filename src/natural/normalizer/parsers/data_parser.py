@@ -4,78 +4,97 @@
 
 import re
 from typing import List
-from natural.ir.models import DataAreaRef, DataField, FieldFormat, RedefineDefinition, ScopeType
+from natural.ir.models import (
+    DataAreaRef,
+    DataField,
+    FieldFormat,
+    RedefineDefinition,
+    ScopeType,
+    ViewDefinition,
+    ViewField,
+)
+
 
 class DataBlockParser:
     def __init__(self):
-        # Supports 1 or 2 digit levels: 1 #VAR, 01 #VAR, 02 NAME
-        # Supports INIT <val> or INIT val
         self.field_pattern = re.compile(
-            r"^\s*(\d{1,2})\s+([*#\+A-Z0-9\-_]+)(?:\s*\(([^)]+)\))?(?:\s+INIT\s*<?([^>]+)?>?)?\s*$",
-            re.IGNORECASE
+            r"^\s*(\d{1,2})\s+([*#\+A-Za-z0-9\-_]+)(?:\s*\(([^)]+)\))?(?:\s+INIT\s*<?([^>]+)?>?)?\s*$",
+            re.IGNORECASE,
         )
         self.redefine_pattern = re.compile(
-            r"^\s*(\d{1,2})\s+REDEFINE\s+([*#\+A-Z0-9\-_]+)\s*$",
-            re.IGNORECASE
+            r"^\s*(\d{1,2})\s+REDEFINE\s+([*#\+A-Za-z0-9\-_]+)\s*$",
+            re.IGNORECASE,
         )
         self.using_pattern = re.compile(
-            r"^\s*(LOCAL|PARAMETER|GLOBAL)\s+USING\s+([A-Z0-9\-_]+)\s*$",
-            re.IGNORECASE
+            r"^\s*(LOCAL|PARAMETER|GLOBAL)\s+USING\s+([A-Za-z0-9\-_]+)\s*$",
+            re.IGNORECASE,
         )
         self.view_pattern = re.compile(
-            r"^\s*(\d{1,2})\s+([A-Z0-9\-_]+)\s+VIEW\s+(?:OF\s+)?([A-Z0-9\-_]+)\s*$",
-            re.IGNORECASE
+            r"^\s*(\d{1,2})\s+([A-Za-z0-9\-_]+)\s+VIEW\s+(?:OF\s+)?([A-Za-z0-9\-_]+)\s*$",
+            re.IGNORECASE,
+        )
+        self.view_field_pattern = re.compile(
+            r"^\s*02\s+([A-Za-z0-9\-_]+)(?:\s*\(([^)]+)\))?\s*$",
+            re.IGNORECASE,
         )
 
     def parse(self, raw_content: str) -> List[DataAreaRef]:
-        areas = []
-        current_area = None
+        areas: List[DataAreaRef] = []
+        current_area: DataAreaRef | None = None
         current_scope = ScopeType.LOCAL
-        current_redefine_target = None
+        current_redefine_target: str | None = None
+        current_view: ViewDefinition | None = None
 
-        # 1. Clean inline & block comments
         clean_text = re.sub(r"/\*.*?(?:\*/|$)", "", raw_content, flags=re.MULTILINE)
-
-        # 2. Split multi-statement lines like "1 #T (A8) 1 REDEFINE #T" into distinct lines
         clean_text = re.sub(r"(?<=[^\n])\s+(\d{1,2}\s+(?:REDEFINE|[#*A-Za-z]))", r"\n\1", clean_text)
-
         lines = [line.strip() for line in clean_text.splitlines() if line.strip() and not line.strip().startswith("*")]
 
         for line in lines:
-            # Scope specifiers (LOCAL, PARAMETER, GLOBAL)
             if line.upper() in ("LOCAL", "PARAMETER", "GLOBAL"):
                 current_scope = ScopeType(line.upper())
                 current_area = DataAreaRef(name=f"INLINE_{current_scope.value}", scope=current_scope)
                 areas.append(current_area)
+                current_view = None
                 continue
 
-            # USING clause
             using_match = self.using_pattern.match(line)
             if using_match:
                 scope_str, name = using_match.groups()
                 areas.append(DataAreaRef(name=name.upper(), scope=ScopeType(scope_str.upper())))
+                current_view = None
                 continue
 
             if not current_area:
                 current_area = DataAreaRef(name=f"INLINE_{current_scope.value}", scope=current_scope)
                 areas.append(current_area)
 
-            # View definition (e.g., 01 MYVIEW VIEW OF EMPLOYEES)
             view_match = self.view_pattern.match(line)
             if view_match:
+                level = int(view_match.group(1))
+                view_name = view_match.group(2).upper()
+                ddm_name = view_match.group(3).upper()
+                current_view = ViewDefinition(level=level, view_name=view_name, ddm_name=ddm_name, fields=[])
+                current_area.views.append(current_view)
                 current_redefine_target = None
                 continue
 
-            # REDEFINE block
+            if current_view and line.startswith("02"):
+                vf_match = self.view_field_pattern.match(line)
+                if vf_match:
+                    f_name = vf_match.group(1).upper()
+                    dim = vf_match.group(2)
+                    current_view.fields.append(ViewField(level=2, name=f_name, array_dim=dim))
+                    continue
+
             redef_match = self.redefine_pattern.match(line)
             if redef_match:
                 level = int(redef_match.group(1))
                 target = redef_match.group(2)
                 current_redefine_target = target
                 current_area.redefines.append(RedefineDefinition(level=level, target_name=target))
+                current_view = None
                 continue
 
-            # Standard variable / field
             field_match = self.field_pattern.match(line)
             if field_match:
                 level = int(field_match.group(1))
@@ -85,6 +104,7 @@ class DataBlockParser:
 
                 if level == 1:
                     current_redefine_target = None
+                    current_view = None
 
                 fmt = self._parse_format(raw_format.strip()) if raw_format else None
 
@@ -93,7 +113,7 @@ class DataBlockParser:
                     name=name,
                     format=fmt,
                     init_val=init_val.strip() if init_val else None,
-                    parent_name=current_redefine_target if level > 1 else None
+                    parent_name=current_redefine_target if level > 1 else None,
                 )
                 current_area.inline_fields.append(field)
 
@@ -103,16 +123,19 @@ class DataBlockParser:
         if not raw_fmt:
             return FieldFormat(kind="unknown", raw_spec="")
 
-        # Extract base type letter
         kind_char = raw_fmt[0].upper()
         kind_map = {
-            "A": "alphanumeric", "P": "packed_decimal", "N": "numeric",
-            "I": "integer", "B": "binary", "L": "boolean", "D": "date"
+            "A": "alphanumeric",
+            "P": "packed_decimal",
+            "N": "numeric",
+            "I": "integer",
+            "B": "binary",
+            "L": "boolean",
+            "D": "date",
         }
         kind = kind_map.get(kind_char, "unknown")
         fmt = FieldFormat(kind=kind, raw_spec=raw_fmt)
 
-        # Parse digits / decimal spec
         match = re.match(r"^[A-Z](\d*)(?:\.(\d+))?$", raw_fmt, re.IGNORECASE)
         if match:
             if match.group(1):

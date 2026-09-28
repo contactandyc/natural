@@ -57,6 +57,7 @@ operations:
     op: ref
     symbol_id: sym.local.date
   edit_mask: DDMMYYYY
+  rounded: false
 - op: branch
   condition:
     op: lt
@@ -72,7 +73,7 @@ operations:
     expr:
       op: literal
       value: 28
-  else_branch: []
+    rounded: false
 - op: loop
   id: loop.repeat_001
   loop_type: until
@@ -91,6 +92,7 @@ operations:
       op: ref
       symbol_id: sym.local.t
     edit_mask: DDMMYYYY
+    rounded: false
   - op: assign
     target_id: sym.local.d
     expr:
@@ -101,12 +103,14 @@ operations:
       rhs:
         op: literal
         value: 1
+    rounded: false
   - op: assign
     target_id: sym.local.t
     expr:
       op: ref
       symbol_id: sym.local.d
     edit_mask: DDMMYYYY
+    rounded: false
 - op: assign
   target_id: sym.local.d
   expr:
@@ -117,3 +121,4 @@ operations:
     rhs:
       op: literal
       value: 1
+  rounded: false

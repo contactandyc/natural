@@ -1,5 +1,4 @@
 name: EOM2
-includes: []
 data_areas:
 - name: INLINE_LOCAL
   scope: LOCAL
@@ -30,15 +29,11 @@ data_areas:
     format:
       kind: date
       raw_spec: D
-  views: []
   redefines:
   - level: 1
     target_name: '#T'
-    fields: []
-subroutines: {}
 body:
 - statement_type: INPUT
-  modifiers: []
   fields:
   - kind: ref
     value: '#DATE'
@@ -50,6 +45,7 @@ body:
     kind: ref
     value: '#T'
   edit_mask: DDMMYYYY
+  is_move_all: false
 - statement_type: IF
   condition:
     kind: binary_op
@@ -62,11 +58,13 @@ body:
       value: 28
   then_branch:
   - statement_type: ASSIGN
-    target: '#DD'
+    target:
+      kind: ref
+      value: '#DD'
     value:
       kind: literal
       value: 28
-  else_branch: []
+    rounded: false
 - statement_type: REPEAT
   loop_type: UNTIL
   condition:
@@ -87,8 +85,11 @@ body:
       kind: ref
       value: '#D'
     edit_mask: DDMMYYYY
+    is_move_all: false
   - statement_type: ASSIGN
-    target: '#D'
+    target:
+      kind: ref
+      value: '#D'
     value:
       kind: binary_op
       operator: +
@@ -98,6 +99,7 @@ body:
       right:
         kind: literal
         value: 1
+    rounded: false
   - statement_type: MOVE
     source:
       kind: ref
@@ -106,8 +108,11 @@ body:
       kind: ref
       value: '#T'
     edit_mask: DDMMYYYY
+    is_move_all: false
 - statement_type: ASSIGN
-  target: '#D'
+  target:
+    kind: ref
+    value: '#D'
   value:
     kind: binary_op
     operator: '-'
@@ -117,6 +122,7 @@ body:
     right:
       kind: literal
       value: 1
+  rounded: false
 - statement_type: PRINT
   fields:
   - kind: literal

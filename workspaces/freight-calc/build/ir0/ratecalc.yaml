@@ -30,7 +30,9 @@ body:
     value: '#SHIP-CLASS'
   body:
   - statement_type: ASSIGN
-    target: '#BASE-CHARGE'
+    target:
+      kind: ref
+      value: '#BASE-CHARGE'
     value:
       kind: binary_op
       operator: '*'
@@ -40,6 +42,7 @@ body:
       right:
         kind: ref
         value: '#SHIP-WEIGHT'
+    rounded: false
   - statement_type: IF
     condition:
       kind: binary_op
@@ -52,9 +55,12 @@ body:
         value: WEIGHT-LIMIT
     then_branch:
     - statement_type: ASSIGN
-      target: '#SURCHARGE'
+      target:
+        kind: ref
+        value: '#SURCHARGE'
       value:
         kind: ref
         value: HEAVY-SURCHARGE
+      rounded: false
     - statement_type: ESCAPE
       target: BOTTOM

@@ -1,5 +1,4 @@
 name: EOM1
-includes: []
 data_areas:
 - name: INLINE_LOCAL
   scope: LOCAL
@@ -41,20 +40,18 @@ data_areas:
       length: 2
       digits: 2
     parent_name: '#DATEA'
-  views: []
   redefines:
   - level: 1
     target_name: '#DATEA'
-    fields: []
-subroutines: {}
 body:
 - statement_type: INPUT
-  modifiers: []
   fields:
   - kind: ref
     value: '#DATE'
 - statement_type: ASSIGN
-  target: '#DATE'
+  target:
+    kind: ref
+    value: '#DATE'
   value:
     kind: binary_op
     operator: +
@@ -64,6 +61,7 @@ body:
     right:
       kind: literal
       value: 31
+  rounded: false
 - statement_type: MOVE
   source:
     kind: ref
@@ -72,11 +70,15 @@ body:
     kind: ref
     value: '#DATEA'
   edit_mask: YYYYMMDD
+  is_move_all: false
 - statement_type: ASSIGN
-  target: '#DATEA.DD'
+  target:
+    kind: ref
+    value: '#DATEA.DD'
   value:
     kind: literal
     value: 1
+  rounded: false
 - statement_type: MOVE
   source:
     kind: ref
@@ -85,8 +87,11 @@ body:
     kind: ref
     value: '#DATE'
   edit_mask: YYYYMMDD
+  is_move_all: false
 - statement_type: ASSIGN
-  target: '#DATE'
+  target:
+    kind: ref
+    value: '#DATE'
   value:
     kind: binary_op
     operator: '-'
@@ -96,6 +101,7 @@ body:
     right:
       kind: literal
       value: 1
+  rounded: false
 - statement_type: PRINT
   fields:
   - kind: literal

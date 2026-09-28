@@ -16,6 +16,7 @@ from natural.ir.models import (
     ForStatement,
     MoveStatement,
     CompressStatement,
+    SeparateStatement,
     ExamineStatement,
     ResetStatement,
     PerformStatement,
@@ -25,11 +26,13 @@ from natural.ir.models import (
     ReadWorkFileStatement,
     WriteWorkFileStatement,
     CloseWorkFileStatement,
+    OnErrorBlockStatement,
 )
 from natural.ir.semantic import (
     SemanticModule,
     Symbol,
     SemanticType,
+    SemanticSubstring,
     AssignOp,
     BranchOp,
     LoopOp,
@@ -40,7 +43,9 @@ from natural.ir.semantic import (
     QueryIterationOp,
     SemanticExpression,
     CompressOp,
+    SeparateOp,
     ExamineOp,
+    MoveAllOp,
     ResetOp,
     CallSubroutineOp,
     EntityUpdateOp,
@@ -50,15 +55,17 @@ from natural.ir.semantic import (
     WriteWorkFileOp,
     CloseWorkFileOp,
     SubroutineBlockOp,
+    OnErrorOp,
 )
 from natural.normalizer.workspace import Workspace
 
 
 class ActiveLoopContext:
-    def __init__(self, loop_id: str, label: Optional[str] = None, entity: Optional[str] = None):
+    def __init__(self, loop_id: str, label: Optional[str] = None, entity: Optional[str] = None, view_name: Optional[str] = None):
         self.loop_id = loop_id
         self.label = label.upper() if label else None
         self.entity = entity
+        self.view_name = view_name.upper() if view_name else None
 
 
 class SemanticLoweringPass:
@@ -153,15 +160,44 @@ class SemanticLoweringPass:
     def resolve_ref(self, name: str) -> str:
         if name in self.symbols:
             return self.symbols[name].id
+
         clean = name.split(".")[-1].lower().replace("#", "")
+
+        # Check local and parameter symbols
         for sym in self.symbols.values():
             if sym.name.lower().replace("#", "") == clean:
                 return sym.id
+
+        # Check active loop database view
+        for ctx in reversed(self.loop_stack):
+            if ctx.view_name and self.workspace:
+                ddm = self.workspace.get_ddm(ctx.view_name)
+                if ddm:
+                    for f in ddm.inline_fields:
+                        if f.name.lower() == clean:
+                            return f"sym.entity.{ctx.view_name.lower()}.{clean}"
+
+        # Check qualified view access: VIEW.FIELD
+        if "." in name:
+            parts = name.split(".")
+            v_name, f_name = parts[0], parts[1]
+            return f"sym.entity.{v_name.lower()}.{f_name.lower().replace('#', '')}"
+
         return f"sym.unresolved.{name.lower().replace('#', '').replace('.', '_')}"
 
     def lower_expr(self, expr: Expression) -> SemanticExpression:
         if expr.kind == "ref":
-            return SemanticExpression(op="ref", symbol_id=self.resolve_ref(expr.value))
+            sub_op = None
+            if expr.substring:
+                sub_op = SemanticSubstring(
+                    start=self.lower_expr(expr.substring.start),
+                    length=self.lower_expr(expr.substring.length) if expr.substring.length else None,
+                )
+            return SemanticExpression(
+                op="ref",
+                symbol_id=self.resolve_ref(str(expr.value)),
+                substring=sub_op,
+            )
         elif expr.kind == "literal":
             return SemanticExpression(op="literal", value=expr.value)
         elif expr.kind == "sys_var":
@@ -203,17 +239,44 @@ class SemanticLoweringPass:
 
     def lower_statement(self, stmt) -> list:
         if isinstance(stmt, AssignStatement):
+            target_str = str(stmt.target.value) if hasattr(stmt.target, "value") else str(stmt.target)
+            target_id = self.resolve_ref(target_str)
+            target_sub = None
+            if hasattr(stmt.target, "substring") and stmt.target.substring:
+                target_sub = SemanticSubstring(
+                    start=self.lower_expr(stmt.target.substring.start),
+                    length=self.lower_expr(stmt.target.substring.length) if stmt.target.substring.length else None,
+                )
             return [
                 AssignOp(
-                    target_id=self.resolve_ref(stmt.target),
+                    target_id=target_id,
+                    target_substring=target_sub,
                     expr=self.lower_expr(stmt.value),
+                    rounded=stmt.rounded,
                 )
             ]
         elif isinstance(stmt, MoveStatement):
             target_str = str(stmt.target.value) if hasattr(stmt.target, "value") else str(stmt.target)
+            target_id = self.resolve_ref(target_str)
+            target_sub = None
+            if hasattr(stmt.target, "substring") and stmt.target.substring:
+                target_sub = SemanticSubstring(
+                    start=self.lower_expr(stmt.target.substring.start),
+                    length=self.lower_expr(stmt.target.substring.length) if stmt.target.substring.length else None,
+                )
+
+            if stmt.is_move_all:
+                return [
+                    MoveAllOp(
+                        target_id=target_id,
+                        fill_char=self.lower_expr(stmt.source),
+                    )
+                ]
+
             return [
                 AssignOp(
-                    target_id=self.resolve_ref(target_str),
+                    target_id=target_id,
+                    target_substring=target_sub,
                     expr=self.lower_expr(stmt.source),
                     edit_mask=stmt.edit_mask,
                 )
@@ -228,15 +291,25 @@ class SemanticLoweringPass:
                     with_delimiters=stmt.with_delimiters,
                 )
             ]
+        elif isinstance(stmt, SeparateStatement):
+            return [
+                SeparateOp(
+                    source=self.lower_expr(stmt.source),
+                    target_ids=[self.resolve_ref(str(t.value)) for t in stmt.targets],
+                    delimiter=self.lower_expr(stmt.delimiter) if stmt.delimiter else None,
+                    ignore_remainder=stmt.ignore_remainder,
+                )
+            ]
         elif isinstance(stmt, ExamineStatement):
             target_str = str(stmt.target.value) if hasattr(stmt.target, "value") else str(stmt.target)
             giving_id = self.resolve_ref(str(stmt.giving_number.value)) if stmt.giving_number else None
             return [
                 ExamineOp(
                     target_id=self.resolve_ref(target_str),
-                    pattern=self.lower_expr(stmt.pattern),
+                    pattern=self.lower_expr(stmt.pattern) if stmt.pattern else None,
                     replace_with=self.lower_expr(stmt.replace_with) if stmt.replace_with else None,
                     giving_number_id=giving_id,
+                    translate_case=stmt.translate_case,
                 )
             ]
         elif isinstance(stmt, ResetStatement):
@@ -247,6 +320,8 @@ class SemanticLoweringPass:
             return ops
         elif isinstance(stmt, PerformStatement):
             return [CallSubroutineOp(subroutine_name=stmt.subroutine_name)]
+        elif isinstance(stmt, OnErrorBlockStatement):
+            return [OnErrorOp(body=self.lower_statements(stmt.body))]
         elif isinstance(stmt, UpdateStatement):
             target_loop_id = self._resolve_target_loop(stmt.loop_label)
             matched_entity = "active_record"
@@ -380,7 +455,9 @@ class SemanticLoweringPass:
             op_name = "find" if isinstance(stmt, FindStatement) else "read"
             loop_id = f"loop.{op_name}_{self.loop_counter:03d}"
             entity_name = stmt.view_name.replace("-VIEW", "")
-            self.loop_stack.append(ActiveLoopContext(loop_id=loop_id, label=stmt.label, entity=entity_name))
+            self.loop_stack.append(
+                ActiveLoopContext(loop_id=loop_id, label=stmt.label, entity=entity_name, view_name=stmt.view_name)
+            )
 
             if self.workspace:
                 ddm = self.workspace.get_ddm(stmt.view_name)
@@ -422,6 +499,9 @@ class SemanticLoweringPass:
                     )
                 on_empty = []
 
+            body_ops = self.lower_statements(stmt.body)
+            self.loop_stack.pop()
+
             op = QueryIterationOp(
                 id=loop_id,
                 label=stmt.label,
@@ -430,10 +510,9 @@ class SemanticLoweringPass:
                 predicate=predicate,
                 limit=limit_val,
                 cardinality=cardinality,
-                body=self.lower_statements(stmt.body),
+                body=body_ops,
                 on_empty=on_empty,
             )
-            self.loop_stack.pop()
             return [op]
         elif isinstance(stmt, EscapeStatement):
             if stmt.target == "ROUTINE":

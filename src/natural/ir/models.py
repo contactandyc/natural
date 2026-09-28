@@ -60,6 +60,11 @@ class DataAreaRef(BaseModel):
     redefines: List[RedefineDefinition] = Field(default_factory=list)
 
 
+class SubstringSpec(BaseModel):
+    start: "Expression"
+    length: Optional["Expression"] = None
+
+
 class Expression(BaseModel):
     kind: str  # literal, ref, binary_op, sys_var
     value: Optional[Any] = None
@@ -67,8 +72,10 @@ class Expression(BaseModel):
     left: Optional["Expression"] = None
     right: Optional["Expression"] = None
     array_dim: Optional[str] = None
+    substring: Optional[SubstringSpec] = None
 
 
+SubstringSpec.model_rebuild()
 Expression.model_rebuild()
 
 
@@ -78,8 +85,9 @@ class Statement(BaseModel):
 
 class AssignStatement(Statement):
     statement_type: str = "ASSIGN"
-    target: str
+    target: Expression
     value: Expression
+    rounded: bool = False
 
 
 class EscapeStatement(Statement):
@@ -164,6 +172,7 @@ class MoveStatement(Statement):
     source: Expression
     target: Expression
     edit_mask: Optional[str] = None
+    is_move_all: bool = False
 
 
 class CompressStatement(Statement):
@@ -174,12 +183,21 @@ class CompressStatement(Statement):
     with_delimiters: bool = False
 
 
+class SeparateStatement(Statement):
+    statement_type: str = "SEPARATE"
+    source: Expression
+    targets: List[Expression] = Field(default_factory=list)
+    delimiter: Optional[Expression] = None
+    ignore_remainder: bool = False
+
+
 class ExamineStatement(Statement):
     statement_type: str = "EXAMINE"
     target: Expression
-    pattern: Expression
+    pattern: Optional[Expression] = None
     replace_with: Optional[Expression] = None
     giving_number: Optional[Expression] = None
+    translate_case: Optional[str] = None  # "UPPER" or "LOWER"
 
 
 class ResetStatement(Statement):
@@ -248,6 +266,9 @@ class CloseWorkFileStatement(Statement):
     statement_type: str = "CLOSE_WORK_FILE"
     file_number: int
 
+class OnErrorBlockStatement(Statement):
+    statement_type: str = "ON_ERROR"
+    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
 
 class SubroutineDefinition(BaseModel):
     name: str
