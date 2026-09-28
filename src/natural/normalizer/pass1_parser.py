@@ -15,6 +15,7 @@ from natural.ir.pass1_models import (
     RepeatBlock,
     ForBlock,
     ReadBlock,
+    HistogramBlock,
     ReadWorkBlock,
     DecideBlock,
     DecideBranchBlock,
@@ -23,6 +24,8 @@ from natural.ir.pass1_models import (
     OnErrorBlock,
     AtStartBlock,
     AtEndBlock,
+    AtBreakBlock,
+    BeforeBreakBlock,
 )
 
 
@@ -50,6 +53,7 @@ class IslandTransformer(Transformer):
             RawStatement,
             FindBlock,
             ReadBlock,
+            HistogramBlock,
             RepeatBlock,
             ForBlock,
             IfBlock,
@@ -58,6 +62,8 @@ class IslandTransformer(Transformer):
             OnErrorBlock,
             AtStartBlock,
             AtEndBlock,
+            AtBreakBlock,
+            BeforeBreakBlock,
         )
         if len(filtered) > 1 and isinstance(filtered[0], str) and not isinstance(filtered[1], non_body_types):
             label = str(filtered[0])
@@ -78,6 +84,10 @@ class IslandTransformer(Transformer):
         label, clause, body = self._extract_label_and_clause(children)
         return ReadBlock(label=label, raw_clause=clause, body=body)
 
+    def histogram_block(self, children) -> HistogramBlock:
+        label, clause, body = self._extract_label_and_clause(children)
+        return HistogramBlock(label=label, raw_clause=clause, body=body)
+
     def read_work_block(self, children) -> ReadWorkBlock:
         label, clause, body = self._extract_label_and_clause(children)
         return ReadWorkBlock(label=label, raw_clause=clause, body=body)
@@ -93,6 +103,14 @@ class IslandTransformer(Transformer):
     def at_end_block(self, children) -> AtEndBlock:
         body = [c for c in children if c is not None]
         return AtEndBlock(body=body)
+
+    def at_break_block(self, children) -> AtBreakBlock:
+        label, clause, body = self._extract_label_and_clause(children)
+        return AtBreakBlock(label=label, raw_clause=clause, body=body)
+
+    def before_break_block(self, children) -> BeforeBreakBlock:
+        body = [c for c in children if c is not None]
+        return BeforeBreakBlock(body=body)
 
     def if_block(self, children) -> IfBlock:
         filtered = [c for c in children if c is not None]
@@ -120,6 +138,7 @@ class IslandTransformer(Transformer):
             RawStatement,
             FindBlock,
             ReadBlock,
+            HistogramBlock,
             RepeatBlock,
             ForBlock,
             IfBlock,
@@ -128,6 +147,8 @@ class IslandTransformer(Transformer):
             OnErrorBlock,
             AtStartBlock,
             AtEndBlock,
+            AtBreakBlock,
+            BeforeBreakBlock,
         )
         for idx, item in enumerate(filtered):
             if isinstance(item, str) and not isinstance(item, non_body_types):

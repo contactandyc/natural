@@ -550,3 +550,124 @@ This commit transitions the compiler from a single-file prototype into an end-to
 | `build/build/python/target_orm.py` | Added fallback dynamic declarative base with generic `__getattr__` column fallbacks. |
 | `tests/test_fixtures.py` | Overhauled fixture runner for multi-file `.test` workspaces and chained `MockQuery` execution. |
 | `tests/fixtures/*.test` | Added `find_compound.test`, `callnat_multi.test`, `transaction.test`, `numeric_edit_mask.test`; updated `repeat_loop.test`. |
+
+
+---
+
+# Chat https://share.gemini.google/G3zPMAvQWhMV
+
+The changes across the diff implement Phase 1 (Database Access & Adabas Transactions), establishing support for control breaks (`AT BREAK`), occurrence aggregations (`HISTOGRAM`), row-level filtering (`ACCEPT`/`REJECT`), and multi-column superdescriptors.
+
+---
+
+### 1. Grammar & Pass 1 Island Parser
+
+* **Grammar Extensions (`src/natural/grammar/pass1_island.lark`):**
+* Added block definitions for `histogram_block`, `at_break_block`, and `before_break_block`.
+* Enforced mandatory `raw_clause` syntax on `at_break_block` (`_AT_BREAK raw_clause statement* _END_BREAK`), preventing the LALR parser from reducing epsilon and consuming the break field as a statement payload.
+* Updated `raw_statement` negative lookahead to exclude `HISTOGRAM`, `BREAK`, `AT BREAK`, and `BEFORE BREAK`.
+
+
+* **Pass 1 AST & Visitor (`src/natural/ir/pass1_models.py`, `src/natural/normalizer/pass1_parser.py`):**
+* Added `HistogramBlock`, `AtBreakBlock`, and `BeforeBreakBlock` node schemas.
+* Added corresponding visitor transformation methods in `IslandTransformer` while excluding the new blocks from generic loop body captures.
+
+
+
+---
+
+### 2. Micro-Parsers & Workspace Schema Resolution
+
+* **Expression Parser (`src/natural/normalizer/parsers/expression_parser.py`):**
+* Elevated the terminal precedence of `SYSTEM_VAR.2` over `VAR_NAME`, ensuring system variables with leading asterisks (such as `*NUMBER`) resolve correctly instead of falling back to unresolved variable references (`*number_UNRESOLVED`).
+* Added `tuple_expr: "(" expr ("," expr)+ ")"` to parse multi-variable tuples.
+
+
+* **Database & Read Parsers (`src/natural/normalizer/parsers/database_parser.py`, `src/natural/normalizer/parsers/read_parser.py`):**
+* Implemented `parse_accept` and `parse_reject` to parse row predicates (`ACCEPT IF <crit>` and `REJECT IF <crit>`).
+* Implemented `parse_histogram` to parse descriptor counting clauses (`HISTOGRAM (limit) VIEW FOR DESCRIPTOR [STARTING FROM ...] [THRU ...]`).
+
+
+* **DDM Superdescriptors (`src/natural/normalizer/workspace.py`):**
+* Enhanced DDM regex matching to parse remainder definitions, extracting constituent composite fields from parentheses (e.g., `(NAME(1:10), DEPT(1:4))`) into `DataField.sub_fields`.
+
+
+
+---
+
+### 3. IR Models & Semantic Lowering
+
+* **IR0 & IR1 Nodes (`src/natural/ir/models.py`, `src/natural/ir/semantic.py`, `src/natural/ir/__init__.py`):**
+* Defined AST statement nodes `HistogramStatement`, `AtBreakStatement`, `AcceptStatement`, and `RejectStatement`.
+* Defined semantic IR1 nodes `AtBreakOp` and augmented `QueryIterationOp` with `descriptor` and `cardinality="histogram"`. Added `target_indices` to `AssignOp`.
+
+
+* **Statement Dispatching (`src/natural/normalizer/pass2_dispatcher.py`):**
+* Routed `HistogramBlock`, `AtBreakBlock`, and `BeforeBreakBlock` into their respective statement models.
+* Routed `ACCEPT` and `REJECT` raw statements into `database_parser`.
+
+
+* **Semantic Normalization (`src/natural/normalizer/lowering.py`):**
+* **System Variables:** Promoted asterisk-prefixed ref expressions to `sys_var`. Lowered `*NUMBER` to `record.number` when evaluated inside active histogram queries (`is_histogram=True`).
+* **Superdescriptor Slicing:** When lowering equality comparisons on composite fields, the lowering pass looks up subfields in the active DDM and decomposes the query into compound conjunctions (`AND`) matching exact substring slices (`ctx.key[(start - 1):(start - 1) + len]`).
+* **Filter Inversion:** Lowered `AcceptStatement` to `BranchOp(condition=not(criteria), then_branch=[ContinueOp])` and `RejectStatement` to `BranchOp(condition=criteria, then_branch=[ContinueOp])`.
+* **Iteration Loops:** Lowered `HistogramStatement` into `QueryIterationOp(cardinality="histogram", ...)`.
+
+
+
+---
+
+### 4. Code Generation & Emitters
+
+* **Query & Break Operations (`src/natural/codegen/python_emitter.py`):**
+* **`AT BREAK`:** Emitted pre-loop state initialization (`_prev_<field> = None`), break change triggers (`if _prev_<field> is not None and <field> != _prev_<field>:`), and post-iteration cache updates (`_prev_<field> = <field>`).
+* **`HISTOGRAM`:** Lowered histogram queries into SQLAlchemy aggregate queries:
+```python
+session.query(Model.col.label('col'), func.count(Model.col).label('number')).group_by(Model.col).limit(...)
+
+```
+
+
+* **Expressions:** Added code emission for `tuple` and `not` operators, and resolved `record.*` references directly.
+
+
+* **Import Precision:**
+* Added automatic `from sqlalchemy import func` harvesting when histogram operations are present.
+* Excluded `sym.scope == "entity_field"` from `_collect_required_imports`, preventing entity schema columns (such as `SALARY (P7.2)`) from leaking unused `from decimal import Decimal` imports into modules that only handle integer or alphanumeric state.
+
+
+
+---
+
+### 5. Test Harness & Integration Fixtures
+
+* **Mock Database Session (`tests/test_fixtures.py`):**
+* Extended `MockQuery` to chain `.group_by(*args)` and `.all()`.
+* Updated `MockSession` to accept test case fixture records and construct mock entity objects for dynamic in-memory execution assertions.
+
+
+* **Feature Test Fixtures (`tests/fixtures/*.test`):**
+* `at_break.test`: Validates `BEFORE BREAK PROCESSING` and `AT BREAK (DEPT)` execution against consecutive records.
+* `accept_reject.test`: Validates filter rejection (`REJECT IF SALARY < 1000`) and acceptance (`ACCEPT IF STATUS = 'ACTIVE'`).
+* `histogram.test`: Validates descriptor grouping and `*NUMBER` occurrences.
+* `superdescriptor.test`: Validates decomposition of `SEC-KEY = #KEY` into multiple SQL column slices.
+
+
+
+---
+
+### Verification and Execution Steps
+
+Run the test suite to execute in-memory compilation and dynamic validation against the Phase 1 target features:
+
+```bash
+# 1. Run the 4 Phase 1 feature fixtures
+./build.sh test at_break accept_reject histogram superdescriptor
+
+# 2. Run the complete regression suite across all 25 fixtures
+./build.sh test
+
+# 3. Verify workspace build compatibility
+./build.sh run build workspaces/freight-calc --diff
+
+```

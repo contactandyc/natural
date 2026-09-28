@@ -1,4 +1,3 @@
-# tests/test_fixtures.py
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 
@@ -113,11 +112,9 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
         for fname, n_src in natural_files.items():
             console.print(Panel(Syntax(n_src, "text", line_numbers=True), title=f"[bold cyan]Input: {fname}[/bold cyan]"))
 
-    # 1. Populate workspace in tmp_path
     for fname, n_src in natural_files.items():
         (tmp_path / fname).write_text(n_src, encoding="utf-8")
 
-    # 2. Compile workspace
     builder = ProjectBuilder(tmp_path)
     builder.compile_workspace(show_diff=False, emit_main=False)
 
@@ -126,7 +123,6 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
     for p in py_dir.glob("*.py"):
         actual_py_files[p.name] = p.read_text(encoding="utf-8").strip()
 
-    # Determine files to verify
     module_stems = {
         Path(f).stem.lower().replace("-", "_")
         for f in natural_files
@@ -147,7 +143,6 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
         for py_name, py_src in relevant_py_files.items():
             console.print(Panel(Syntax(py_src, "python", line_numbers=True), title=f"[bold blue]Emitted: {py_name}[/bold blue]"))
 
-    # 3. Check / Bless Python Source
     diffs = []
     for expected_name, expected_code in expected_py_files.items():
         actual_code = relevant_py_files.get(expected_name, "")
@@ -181,7 +176,6 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
             diff_report = "\n\n".join(diffs)
             assert False, f"Code generation mismatch in {fixture_path.name}:\n{diff_report}"
 
-    # 4. Dynamic Execution & Assertions
     if not execute_yaml:
         return
 
@@ -195,7 +189,6 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
     else:
         return
 
-    # Resolve entrypoint module
     fixture_stem = fixture_path.stem.lower().replace("-", "_")
     if entrypoint_candidate:
         entrypoint_stem = entrypoint_candidate.lower().replace("-", "_")
@@ -209,12 +202,10 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
         ]
         entrypoint_stem = nsp_stems[0] if nsp_stems else sorted(module_stems)[0]
 
-    # Prepend build output directory to sys.path
     py_dir_str = str(py_dir.resolve())
     if py_dir_str not in sys.path:
         sys.path.insert(0, py_dir_str)
 
-    # Invalidate cached module imports for clean fixture isolation
     for stem in module_stems | {"target_orm"}:
         if stem in sys.modules:
             del sys.modules[stem]
@@ -236,9 +227,18 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
         def limit(self, *args, **kwargs):
             return self
 
+        def group_by(self, *args, **kwargs):
+            return self
+
+        def all(self):
+            return self
+
     class MockSession:
+        def __init__(self, records=None):
+            self._records = records or []
+
         def query(self, *args, **kwargs):
-            return MockQuery()
+            return MockQuery(self._records)
 
         def add(self, *args):
             pass
@@ -258,12 +258,13 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
         def refresh(self, *args):
             pass
 
-    session = MockSession()
-
     if verbose_enabled:
         console.print(f"[bold cyan]5. Executing Test Cases against '{entrypoint_stem}.py':[/bold cyan]")
 
     for i, case in enumerate(test_cases, 1):
+        session = MockSession(
+            [type("Record", (), r)() for r in case.get("records", [])]
+        )
         ctx = ctx_class()
         for field, val in case.get("input", {}).items():
             default_val = getattr(ctx, field, None)

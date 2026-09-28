@@ -1,0 +1,44 @@
+=== NATURAL: TARIFF-VIEW.ddm ===
+1 AC CLASS                              A    4  N N
+
+=== NATURAL: HIST_TEST.nsp ===
+DEFINE DATA PARAMETER
+1 #TOTAL_GROUPS (I4)
+1 #MAX_COUNT    (I4)
+END-DEFINE
+HISTOGRAM (5) TARIFF-VIEW FOR CLASS
+  #TOTAL_GROUPS := #TOTAL_GROUPS + 1
+  IF *NUMBER > #MAX_COUNT
+    #MAX_COUNT := *NUMBER
+  END-IF
+END-HISTOGRAM
+
+=== PYTHON: hist_test.py ===
+from sqlalchemy import func
+from target_orm import Tariff
+
+class HistTestContext:
+    def __init__(self):
+        self.total_groups = 0
+        self.max_count = 0
+
+def execute_hist_test(ctx: HistTestContext, session):
+    for loop_idx, record in enumerate(session.query(Tariff.class_.label('class_'), func.count(Tariff.class_).label('number')).group_by(Tariff.class_).limit(5), 1):
+        loop_counter = loop_idx
+        ctx.total_groups = (ctx.total_groups + 1)
+        if (record.number > ctx.max_count):
+            ctx.max_count = record.number
+    return ctx
+
+=== EXECUTE ===
+- input:
+    total_groups: 0
+    max_count: 0
+  records:
+    - class_: "AIR"
+      number: 15
+    - class_: "SEA"
+      number: 8
+  expected:
+    total_groups: 2
+    max_count: 15

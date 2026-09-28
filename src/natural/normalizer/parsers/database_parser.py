@@ -10,6 +10,8 @@ from natural.ir.models import (
     DeleteStatement,
     EndTransactionStatement,
     BackoutTransactionStatement,
+    AcceptStatement,
+    RejectStatement,
 )
 from natural.normalizer.parsers.expression_parser import ExpressionParser
 
@@ -24,6 +26,22 @@ class DatabaseOpParser:
         self.update_pattern = re.compile(r"^\s*UPDATE(?:\s*\(([A-Za-z0-9\-_]+)\.?\))?\s*$", re.IGNORECASE)
         self.end_trans_pattern = re.compile(r"^\s*END\s+TRANSACTION(?:\s+(.+))?\s*$", re.IGNORECASE)
         self.backout_trans_pattern = re.compile(r"^\s*BACKOUT\s+TRANSACTION\s*$", re.IGNORECASE)
+
+    def parse_accept(self, raw_statement: str) -> AcceptStatement:
+        clean = re.sub(r"/\*.*$", "", raw_statement).strip()
+        m = re.match(r"^\s*ACCEPT(?:\s+IF)?\s+(.+)$", clean, re.IGNORECASE)
+        if not m:
+            raise ValueError(f"Invalid ACCEPT syntax: {raw_statement}")
+        crit = self.expr_parser.parse(m.group(1).strip())
+        return AcceptStatement(criteria=crit)
+
+    def parse_reject(self, raw_statement: str) -> RejectStatement:
+        clean = re.sub(r"/\*.*$", "", raw_statement).strip()
+        m = re.match(r"^\s*REJECT(?:\s+IF)?\s+(.+)$", clean, re.IGNORECASE)
+        if not m:
+            raise ValueError(f"Invalid REJECT syntax: {raw_statement}")
+        crit = self.expr_parser.parse(m.group(1).strip())
+        return RejectStatement(criteria=crit)
 
     def parse(self, raw_statement: str):
         clean = re.sub(r"/\*.*$", "", raw_statement).strip()

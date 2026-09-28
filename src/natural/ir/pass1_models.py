@@ -32,6 +32,10 @@ class ReadBlock(BlockNode):
     pass
 
 
+class HistogramBlock(BlockNode):
+    pass
+
+
 class RepeatBlock(BlockNode):
     is_post_test: bool = False
 
@@ -76,6 +80,14 @@ class AtStartBlock(Pass1Node):
 
 
 class AtEndBlock(Pass1Node):
+    body: List[Any] = Field(default_factory=list)
+
+
+class AtBreakBlock(BlockNode):
+    pass
+
+
+class BeforeBreakBlock(Pass1Node):
     body: List[Any] = Field(default_factory=list)
 
 

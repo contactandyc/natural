@@ -29,6 +29,7 @@ class DataField(BaseModel):
     parent_name: Optional[str] = None
     array_dim: Optional[str] = None
     init_val: Optional[Any] = None
+    sub_fields: List[Any] = Field(default_factory=list)
 
 
 class RedefineDefinition(BaseModel):
@@ -66,7 +67,7 @@ class SubstringSpec(BaseModel):
 
 
 class Expression(BaseModel):
-    kind: str  # literal, ref, binary_op, sys_var
+    kind: str  # literal, ref, binary_op, sys_var, tuple
     value: Optional[Any] = None
     operator: Optional[str] = None
     left: Optional["Expression"] = None
@@ -139,6 +140,34 @@ class ReadStatement(Statement):
     thru_value: Optional[Expression] = None
     limit: Optional[int] = None
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+
+
+class HistogramStatement(Statement):
+    statement_type: str = "HISTOGRAM"
+    label: Optional[str] = None
+    view_name: str
+    descriptor: str
+    starting_from: Optional[Expression] = None
+    thru_value: Optional[Expression] = None
+    limit: Optional[int] = None
+    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+
+
+class AtBreakStatement(Statement):
+    statement_type: str = "AT_BREAK"
+    field_name: Optional[str] = None
+    is_before: bool = False
+    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+
+
+class AcceptStatement(Statement):
+    statement_type: str = "ACCEPT"
+    criteria: Expression
+
+
+class RejectStatement(Statement):
+    statement_type: str = "REJECT"
+    criteria: Expression
 
 
 class CallnatStatement(Statement):

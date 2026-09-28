@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from natural.ir.models import DataAreaRef, DataField, FieldFormat, ScopeType
 
+
 class Workspace:
     def __init__(self, include_dirs: list[Path]):
         self.include_dirs = include_dirs
@@ -73,15 +74,17 @@ class Workspace:
             return None
 
         fields = []
-        pattern = re.compile(r'^\s*(\d+)\s+[A-Z0-9]{2}\s+([A-Z0-9\-]+)\s+([A-Z])\s+([\d\.]+)')
+        pattern = re.compile(r'^\s*(\d+)\s+([A-Z0-9]{2})\s+([A-Z0-9\-]+)\s+([A-Z])\s+([\d\.]+)(.*)$')
 
         for line in content.splitlines():
             match = pattern.match(line)
             if match:
                 level = int(match.group(1))
-                fname = match.group(2)
-                kind_char = match.group(3)
-                raw_spec = f"{kind_char}{match.group(4)}"
+                code = match.group(2)
+                fname = match.group(3)
+                kind_char = match.group(4)
+                raw_spec = f"{kind_char}{match.group(5)}"
+                remainder = match.group(6)
 
                 kind_map = {
                     "A": "alphanumeric", "P": "packed_decimal",
@@ -90,9 +93,16 @@ class Workspace:
                 }
                 kind = kind_map.get(kind_char, "unknown")
 
+                sub_fields = []
+                if "(" in remainder:
+                    raw_subs = re.findall(r'([A-Za-z0-9\-_]+)\s*\(\s*(\d+)\s*:\s*(\d+)\s*\)', remainder)
+                    for s_name, s_start, s_end in raw_subs:
+                        sub_fields.append((s_name, int(s_start), int(s_end)))
+
                 fields.append(DataField(
                     level=level, name=fname,
-                    format=FieldFormat(kind=kind, raw_spec=raw_spec)
+                    format=FieldFormat(kind=kind, raw_spec=raw_spec),
+                    sub_fields=sub_fields,
                 ))
 
         if fields:

@@ -14,6 +14,7 @@ from natural.ir.pass1_models import (
     IfBlock,
     RepeatBlock,
     ReadBlock,
+    HistogramBlock,
     DecideBlock,
     ForBlock,
     SubroutineBlock,
@@ -21,6 +22,8 @@ from natural.ir.pass1_models import (
     OnErrorBlock,
     AtStartBlock,
     AtEndBlock,
+    AtBreakBlock,
+    BeforeBreakBlock,
 )
 from natural.ir.models import (
     NaturalModule,
@@ -28,6 +31,7 @@ from natural.ir.models import (
     OnErrorBlockStatement,
     AtStartOfDataStatement,
     AtEndOfDataStatement,
+    AtBreakStatement,
     StopStatement,
     TerminateStatement,
     ResizeArrayStatement,
@@ -118,6 +122,12 @@ class Pass2Dispatcher:
             stmt.body = self._dispatch_children(node.body)
             return stmt
 
+        if isinstance(node, HistogramBlock):
+            stmt = self.read_parser.parse_histogram(node.raw_clause)
+            stmt.label = node.label
+            stmt.body = self._dispatch_children(node.body)
+            return stmt
+
         if isinstance(node, ReadWorkBlock):
             stmt = self.work_parser.parse_read_clause(node.raw_clause, label=node.label)
             stmt.body = self._dispatch_children(node.body)
@@ -148,6 +158,21 @@ class Pass2Dispatcher:
 
         if isinstance(node, AtEndBlock):
             return AtEndOfDataStatement(body=self._dispatch_children(node.body))
+
+        if isinstance(node, AtBreakBlock):
+            field_name = node.raw_clause.strip("() ").strip() if node.raw_clause else None
+            return AtBreakStatement(
+                field_name=field_name,
+                is_before=False,
+                body=self._dispatch_children(node.body),
+            )
+
+        if isinstance(node, BeforeBreakBlock):
+            return AtBreakStatement(
+                field_name=None,
+                is_before=True,
+                body=self._dispatch_children(node.body),
+            )
 
         if isinstance(node, DecideBlock):
             decide_stmt = self.decide_parser.parse(node.raw_clause, decide_type=node.decide_type)
@@ -194,6 +219,12 @@ class Pass2Dispatcher:
                 return self.db_parser.parse(text)
             except ValueError:
                 pass
+
+        if upper.startswith("ACCEPT ") or upper == "ACCEPT":
+            return self.db_parser.parse_accept(text)
+
+        if upper.startswith("REJECT ") or upper == "REJECT":
+            return self.db_parser.parse_reject(text)
 
         if upper.startswith("WRITE WORK "):
             return self.work_parser.parse_write(text)

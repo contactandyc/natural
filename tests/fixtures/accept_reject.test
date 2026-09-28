@@ -1,0 +1,50 @@
+=== NATURAL: EMPLOYEES.ddm ===
+1 AC STATUS                             A   10  N N
+1 AD SALARY                             P  7.2  N N
+
+=== NATURAL: ACC_REJ.nsp ===
+DEFINE DATA PARAMETER
+1 #PROCESSED (I4)
+1 #SUM       (P7.2)
+END-DEFINE
+READ EMPLOYEES BY SALARY
+  REJECT IF SALARY < 1000
+  ACCEPT IF STATUS = 'ACTIVE'
+  #SUM := #SUM + SALARY
+  #PROCESSED := #PROCESSED + 1
+END-READ
+
+=== PYTHON: acc_rej.py ===
+from decimal import Decimal
+from target_orm import Employees
+
+class AccRejContext:
+    def __init__(self):
+        self.processed = 0
+        self.sum = Decimal('0')
+
+def execute_acc_rej(ctx: AccRejContext, session):
+    for loop_idx, record in enumerate(session.query(Employees).filter(True), 1):
+        loop_counter = loop_idx
+        if (record.salary < 1000):
+            continue
+        if (not (record.status == 'ACTIVE')):
+            continue
+        ctx.sum = (ctx.sum + record.salary)
+        ctx.processed = (ctx.processed + 1)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    processed: 0
+    sum: "0.00"
+  records:
+    - salary: 500
+      status: "ACTIVE"
+    - salary: 1500
+      status: "TERMINATED"
+    - salary: 2000
+      status: "ACTIVE"
+  expected:
+    processed: 1
+    sum: "2000.00"

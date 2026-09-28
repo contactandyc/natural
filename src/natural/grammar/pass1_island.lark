@@ -6,6 +6,7 @@ module: statement*
 ?block: define_data_block
       | find_block
       | read_block
+      | histogram_block
       | if_block
       | repeat_block
       | for_block
@@ -16,6 +17,8 @@ module: statement*
       | on_error_block
       | at_start_block
       | at_end_block
+      | at_break_block
+      | before_break_block
 
 define_data_block: _DEFINE_DATA RAW_DATA_CONTENT? _END_DEFINE
 _DEFINE_DATA: /DEFINE\s+DATA/i
@@ -29,6 +32,10 @@ _END_FIND: /END-FIND/i
 read_block: [label] _READ raw_clause statement* _END_READ
 _READ: /READ/i
 _END_READ: /END-READ/i
+
+histogram_block: [label] _HISTOGRAM raw_clause statement* _END_HISTOGRAM
+_HISTOGRAM: /HISTOGRAM\b/i
+_END_HISTOGRAM: /END-HISTOGRAM\b/i
 
 if_block: _IF raw_clause statement* (ELSE statement*)? _END_IF
 _IF: /IF/i
@@ -79,9 +86,16 @@ at_end_block: _AT_END statement* _END_END
 _AT_END: /AT\s+END\s+(?:OF\s+)?DATA\b/i
 _END_END: /END-END\b/i
 
+at_break_block: _AT_BREAK raw_clause statement* _END_BREAK
+_AT_BREAK: /AT\s+BREAK\b/i
+
+before_break_block: _BEFORE_BREAK statement* _END_BREAK
+_BEFORE_BREAK: /BEFORE\s+BREAK(?:\s+PROCESSING)?\b/i
+_END_BREAK: /END-BREAK\b/i
+
 label: /[A-Za-z0-9\-_]+\./
 
-raw_statement: /(?!(?i:\s*(?:END-(?:FIND|IF|REPEAT|FOR|READ|DEFINE|DECIDE|SUBROUTINE|WORK|ERROR|START|END)|UNTIL|ELSE|FIND|IF|REPEAT|FOR|READ|DEFINE|DECIDE|VALUE|WHEN|NONE|ANY|ON\s+ERROR|AT\s+START|AT\s+END)\b))[^\n]+/
+raw_statement: /(?!(?i:\s*(?:END-(?:FIND|IF|REPEAT|FOR|READ|HISTOGRAM|DEFINE|DECIDE|SUBROUTINE|WORK|ERROR|START|END|BREAK)|UNTIL|ELSE|FIND|IF|REPEAT|FOR|READ|HISTOGRAM|DEFINE|DECIDE|VALUE|WHEN|NONE|ANY|ON\s+ERROR|AT\s+START|AT\s+END|AT\s+BREAK|BEFORE\s+BREAK)\b))[^\n]+/
 raw_clause: /[^\n]+/
 
 %import common.WS

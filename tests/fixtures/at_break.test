@@ -1,0 +1,47 @@
+=== NATURAL: EMPLOYEES.ddm ===
+1 AC DEPT                               A    4  N N
+
+=== NATURAL: AT_BREAK.nsp ===
+DEFINE DATA PARAMETER
+1 #BREAK_COUNT (I4)
+1 #LAST_DEPT   (A4)
+END-DEFINE
+READ EMPLOYEES BY DEPT
+  BEFORE BREAK PROCESSING
+    #LAST_DEPT := DEPT
+  END-BREAK
+  AT BREAK (DEPT)
+    #BREAK_COUNT := #BREAK_COUNT + 1
+  END-BREAK
+END-READ
+
+=== PYTHON: at_break.py ===
+from target_orm import Employees
+
+class AtBreakContext:
+    def __init__(self):
+        self.break_count = 0
+        self.last_dept = ""
+
+def execute_at_break(ctx: AtBreakContext, session):
+    _prev_dept = None
+    for loop_idx, record in enumerate(session.query(Employees).filter(True), 1):
+        loop_counter = loop_idx
+        ctx.last_dept = record.dept
+        if _prev_dept is not None and record.dept != _prev_dept:
+            ctx.break_count = (ctx.break_count + 1)
+        _prev_dept = record.dept
+    return ctx
+
+=== EXECUTE ===
+- input:
+    break_count: 0
+    last_dept: ""
+  records:
+    - dept: "FIN"
+    - dept: "FIN"
+    - dept: "MKT"
+    - dept: "SAL"
+  expected:
+    break_count: 2
+    last_dept: "SAL"

@@ -1,0 +1,40 @@
+=== NATURAL: EMPLOYEES.ddm ===
+1 SP SEC-KEY                            A   14  S (NAME(1:10), DEPT(1:4))
+1 AC NAME                               A   10  N N
+1 AD DEPT                               A    4  N N
+1 AE SALARY                             P  7.2  N N
+
+=== NATURAL: SUPERDESC.nsp ===
+DEFINE DATA
+LOCAL
+  1 #KEY (A14)
+  1 #SALARY (P7.2)
+END-DEFINE
+FIND (1) EMPLOYEES WITH SEC-KEY = #KEY
+  #SALARY := SALARY
+END-FIND
+
+=== PYTHON: superdesc.py ===
+from decimal import Decimal
+from target_orm import Employees
+
+class SuperdescContext:
+    def __init__(self):
+        self.key = ""
+        self.salary = Decimal('0')
+
+def execute_superdesc(ctx: SuperdescContext, session):
+    for loop_idx, record in enumerate(session.query(Employees).filter(((Employees.name == ctx.key[(1 - 1):(1 - 1) + 10]) and (Employees.dept == ctx.key[(11 - 1):(11 - 1) + 4]))).limit(1), 1):
+        loop_counter = loop_idx
+        ctx.salary = record.salary
+    return ctx
+
+=== EXECUTE ===
+- input:
+    key: "SMITH     SALE"
+  records:
+    - name: "SMITH     "
+      dept: "SALE"
+      salary: "65000.00"
+  expected:
+    salary: "65000.00"

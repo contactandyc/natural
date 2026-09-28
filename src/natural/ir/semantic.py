@@ -59,6 +59,7 @@ class AssignOp(SemanticStatement):
     op: str = "assign"
     target_id: str
     target_substring: Optional[SemanticSubstring] = None
+    target_indices: List[SemanticExpression] = Field(default_factory=list)
     expr: SemanticExpression
     edit_mask: Optional[str] = None
     rounded: bool = False
@@ -75,7 +76,7 @@ class LoopOp(SemanticStatement):
     op: str = "loop"
     id: str
     label: Optional[str] = None
-    loop_type: str = "while"  # while, until, infinite
+    loop_type: str = "while"  # while, until, until_post, infinite
     condition: Optional[SemanticExpression] = None
     body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
 
@@ -139,6 +140,13 @@ class AtStartOfDataOp(SemanticStatement):
 
 class AtEndOfDataOp(SemanticStatement):
     op: str = "at_end_of_data"
+    body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
+
+
+class AtBreakOp(SemanticStatement):
+    op: str = "at_break"
+    field_name: str = ""
+    is_before: bool = False
     body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
 
 
@@ -212,6 +220,7 @@ class QueryIterationOp(SemanticStatement):
     predicate: SemanticExpression
     limit: Optional[int] = None
     cardinality: str = "many"
+    descriptor: Optional[str] = None
     on_empty: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
     body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
 

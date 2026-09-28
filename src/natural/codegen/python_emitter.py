@@ -28,6 +28,7 @@ from natural.ir.semantic import (
     TerminateOp,
     AtStartOfDataOp,
     AtEndOfDataOp,
+    AtBreakOp,
     ResizeArrayOp,
     EntityUpdateOp,
     EntityStoreOp,
@@ -57,6 +58,8 @@ class PythonEmitter:
         return "".join(part.title() for part in clean.split("_") if part)
 
     def _resolve_ref(self, symbol_id: str, model_class: Optional[str] = None) -> str:
+        if symbol_id.startswith("record."):
+            return symbol_id
         parts = symbol_id.split(".")
         if len(parts) >= 3 and parts[1] in ("local", "parameter"):
             return f"ctx.{self._clean_name(parts[-1])}"
@@ -90,6 +93,12 @@ class PythonEmitter:
                     return f"{base_ref}[({start_val} - 1):({start_val} - 1) + {len_val}]"
                 return f"{base_ref}[({start_val} - 1):]"
             return base_ref
+        elif expr.op == "tuple":
+            items = ", ".join(self.emit_expr(it, model_class=model_class) for it in expr.items)
+            return f"({items})"
+        elif expr.op == "not":
+            inner = self.emit_expr(expr.lhs, model_class=model_class)
+            return f"(not {inner})"
         elif expr.op == "literal":
             if isinstance(expr.value, Decimal):
                 return f"Decimal('{expr.value}')"
@@ -276,6 +285,21 @@ class PythonEmitter:
                 self.emit_operation(sub_op)
             self.indent_level -= 1
 
+        elif isinstance(op, AtBreakOp):
+            if op.field_name:
+                field_ref = self._resolve_ref(op.field_name)
+                clean_f = self._clean_name(op.field_name)
+                self.emit_line(f"if _prev_{clean_f} is not None and {field_ref} != _prev_{clean_f}:")
+                self.indent_level += 1
+                if not op.body:
+                    self.emit_line("pass")
+                for sub_op in op.body:
+                    self.emit_operation(sub_op)
+                self.indent_level -= 1
+            else:
+                for sub_op in op.body:
+                    self.emit_operation(sub_op)
+
         elif isinstance(op, ResizeArrayOp):
             target = self._resolve_ref(op.target_id)
             size = self.emit_expr(op.size)
@@ -397,8 +421,31 @@ class PythonEmitter:
 
         elif isinstance(op, QueryIterationOp):
             model_name = self._clean_name(op.entity).title().replace("_", "")
-            cond = self.emit_expr(op.predicate, model_class=model_name)
             limit_clause = f".limit({op.limit})" if getattr(op, "limit", None) else ""
+
+            if getattr(op, "cardinality", "") == "histogram":
+                col_name = self._clean_name(op.descriptor or "id")
+                cond = self.emit_expr(op.predicate, model_class=model_name)
+                filter_clause = f".filter({cond})" if cond != "True" else ""
+                self.emit_line(
+                    f"for loop_idx, record in enumerate(session.query({model_name}.{col_name}.label('{col_name}'), func.count({model_name}.{col_name}).label('number')){filter_clause}.group_by({model_name}.{col_name}){limit_clause}, 1):"
+                )
+                self.indent_level += 1
+                self.emit_line("loop_counter = loop_idx")
+                if not op.body:
+                    self.emit_line("pass")
+                for sub_op in op.body:
+                    self.emit_operation(sub_op)
+                self.indent_level -= 1
+                return
+
+            cond = self.emit_expr(op.predicate, model_class=model_name)
+
+            break_ops = [sub for sub in op.body if isinstance(sub, AtBreakOp) and sub.field_name]
+            for b_op in break_ops:
+                clean_f = self._clean_name(b_op.field_name)
+                self.emit_line(f"_prev_{clean_f} = None")
+
             self.emit_line(f"for loop_idx, record in enumerate(session.query({model_name}).filter({cond}){limit_clause}, 1):")
             self.indent_level += 1
             self.emit_line("loop_counter = loop_idx")
@@ -406,6 +453,12 @@ class PythonEmitter:
                 self.emit_line("pass")
             for sub_op in op.body:
                 self.emit_operation(sub_op)
+
+            for b_op in break_ops:
+                clean_f = self._clean_name(b_op.field_name)
+                field_ref = self._resolve_ref(b_op.field_name)
+                self.emit_line(f"_prev_{clean_f} = {field_ref}")
+
             self.indent_level -= 1
 
     def emit_main_block(self, class_name: str, func_name: str):
@@ -466,6 +519,10 @@ class PythonEmitter:
         self.emit_line("def limit(self, *args, **kwargs):")
         self.indent_level += 1
         self.emit_line("return self")
+        self.indent_level -= 1
+        self.emit_line("def group_by(self, *args, **kwargs):")
+        self.indent_level += 1
+        self.emit_line("return self")
         self.indent_level -= 2
         self.emit_line("")
         self.emit_line("class MockSession:")
@@ -510,6 +567,8 @@ class PythonEmitter:
         needs_timedelta = False
 
         for sym in self.module.symbols.values():
+            if sym.scope == "entity_field":
+                continue
             base = sym.semantic_type.base
             if base == "decimal":
                 needs_decimal = True
@@ -616,14 +675,19 @@ class PythonEmitter:
             self.emit_line(f"from {prog} import execute_{prog}")
 
         orm_models = set()
+        needs_func = False
         for op in self.module.operations:
             if isinstance(op, (QueryIterationOp, EntityStoreOp)):
                 orm_models.add(self._clean_name(op.entity).title().replace("_", ""))
+                if getattr(op, "cardinality", "") == "histogram":
+                    needs_func = True
 
+        if needs_func:
+            self.emit_line("from sqlalchemy import func")
         if orm_models:
             self.emit_line(f"from target_orm import {', '.join(sorted(orm_models))}")
 
-        if import_lines or callnat_imports or orm_models:
+        if import_lines or callnat_imports or orm_models or needs_func:
             self.emit_line("")
 
         class_name = self._to_pascal_case(self.module.module_id) + "Context"

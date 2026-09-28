@@ -8,6 +8,7 @@ from natural.ir.models import (
     AssignStatement,
     FindStatement,
     ReadStatement,
+    HistogramStatement,
     ConditionalStatement,
     DecideStatement,
     EscapeStatement,
@@ -31,6 +32,9 @@ from natural.ir.models import (
     TerminateStatement,
     AtStartOfDataStatement,
     AtEndOfDataStatement,
+    AtBreakStatement,
+    AcceptStatement,
+    RejectStatement,
     ResizeArrayStatement,
     ReadWorkFileStatement,
     WriteWorkFileStatement,
@@ -63,6 +67,7 @@ from natural.ir.semantic import (
     TerminateOp,
     AtStartOfDataOp,
     AtEndOfDataOp,
+    AtBreakOp,
     ResizeArrayOp,
     EntityUpdateOp,
     EntityStoreOp,
@@ -77,11 +82,12 @@ from natural.normalizer.workspace import Workspace
 
 
 class ActiveLoopContext:
-    def __init__(self, loop_id: str, label: Optional[str] = None, entity: Optional[str] = None, view_name: Optional[str] = None):
+    def __init__(self, loop_id: str, label: Optional[str] = None, entity: Optional[str] = None, view_name: Optional[str] = None, is_histogram: bool = False):
         self.loop_id = loop_id
         self.label = label.upper() if label else None
         self.entity = entity
         self.view_name = view_name.upper() if view_name else None
+        self.is_histogram = is_histogram
 
 
 class SemanticLoweringPass:
@@ -200,6 +206,9 @@ class SemanticLoweringPass:
         return f"sym.unresolved.{name.lower().replace('#', '').replace('.', '_')}"
 
     def lower_expr(self, expr: Expression) -> SemanticExpression:
+        if expr.kind == "ref" and str(expr.value).startswith("*"):
+            expr = Expression(kind="sys_var", value=expr.value)
+
         if expr.kind == "ref":
             sub_op = None
             if expr.substring:
@@ -214,6 +223,9 @@ class SemanticLoweringPass:
                 array_indices=arr_indices,
                 substring=sub_op,
             )
+        elif expr.kind == "tuple":
+            items = [self.lower_expr(it) for it in expr.array_indices]
+            return SemanticExpression(op="tuple", items=items)
         elif expr.kind == "literal":
             return SemanticExpression(op="literal", value=expr.value)
         elif expr.kind == "sys_var":
@@ -223,6 +235,9 @@ class SemanticLoweringPass:
             elif var_name.startswith("*ISN"):
                 return SemanticExpression(op="ref", symbol_id="sym.entity.active.id")
             elif var_name.startswith("*NUMBER"):
+                for ctx in reversed(self.loop_stack):
+                    if getattr(ctx, "is_histogram", False):
+                        return SemanticExpression(op="ref", symbol_id="record.number")
                 return SemanticExpression(op="literal", value=1)
             elif var_name in ("*DATX", "*DATN"):
                 return SemanticExpression(op="sys_date", value="date.today()")
@@ -235,6 +250,53 @@ class SemanticLoweringPass:
                 ">": "gt", "<": "lt", "=": "eq", ">=": "gte", "<=": "lte", "<>": "neq",
                 "AND": "and", "OR": "or",
             }
+
+            if expr.operator == "=" and expr.left and expr.right:
+                if expr.left.kind == "tuple" and expr.right.kind == "tuple":
+                    pairs = []
+                    for l_item, r_item in zip(expr.left.array_indices, expr.right.array_indices):
+                        pairs.append(
+                            SemanticExpression(
+                                op="eq",
+                                lhs=self.lower_expr(l_item),
+                                rhs=self.lower_expr(r_item),
+                            )
+                        )
+                    res = pairs[0]
+                    for p in pairs[1:]:
+                        res = SemanticExpression(op="and", lhs=res, rhs=p)
+                    return res
+
+                if expr.left.kind == "ref" and self.loop_stack:
+                    active_ctx = self.loop_stack[-1]
+                    if active_ctx.view_name and self.workspace:
+                        ddm = self.workspace.get_ddm(active_ctx.view_name)
+                        if ddm:
+                            f_match = next((f for f in ddm.inline_fields if f.name.upper() == str(expr.left.value).upper()), None)
+                            if f_match and f_match.sub_fields:
+                                sub_pairs = []
+                                curr_key_offset = 1
+                                for s_name, s_start, s_end in f_match.sub_fields:
+                                    s_len = (s_end - s_start) + 1
+                                    sub_lhs = SemanticExpression(
+                                        op="entity_field",
+                                        symbol_id=f"sym.entity.{active_ctx.view_name.lower()}.{s_name.lower()}",
+                                    )
+                                    sub_rhs = SemanticExpression(
+                                        op="ref",
+                                        symbol_id=self.resolve_ref(str(expr.right.value)),
+                                        substring=SemanticSubstring(
+                                            start=SemanticExpression(op="literal", value=curr_key_offset),
+                                            length=SemanticExpression(op="literal", value=s_len),
+                                        ),
+                                    )
+                                    curr_key_offset += s_len
+                                    sub_pairs.append(SemanticExpression(op="eq", lhs=sub_lhs, rhs=sub_rhs))
+                                res = sub_pairs[0]
+                                for sp in sub_pairs[1:]:
+                                    res = SemanticExpression(op="and", lhs=res, rhs=sp)
+                                return res
+
             return SemanticExpression(
                 op=op_map.get(expr.operator, expr.operator.lower() if expr.operator else "unknown"),
                 lhs=self.lower_expr(expr.left) if expr.left else None,
@@ -360,6 +422,36 @@ class SemanticLoweringPass:
             return [AtStartOfDataOp(body=self.lower_statements(stmt.body))]
         elif isinstance(stmt, AtEndOfDataStatement):
             return [AtEndOfDataOp(body=self.lower_statements(stmt.body))]
+        elif isinstance(stmt, AtBreakStatement):
+            resolved_field = ""
+            if stmt.field_name:
+                resolved_field = self.resolve_ref(stmt.field_name)
+            return [
+                AtBreakOp(
+                    field_name=resolved_field,
+                    is_before=stmt.is_before,
+                    body=self.lower_statements(stmt.body),
+                )
+            ]
+        elif isinstance(stmt, AcceptStatement):
+            target_loop = self._resolve_target_loop(None)
+            cond = self.lower_expr(stmt.criteria)
+            not_cond = SemanticExpression(op="not", lhs=cond)
+            return [
+                BranchOp(
+                    condition=not_cond,
+                    then_branch=[ContinueOp(target_loop_id=target_loop)],
+                )
+            ]
+        elif isinstance(stmt, RejectStatement):
+            target_loop = self._resolve_target_loop(None)
+            cond = self.lower_expr(stmt.criteria)
+            return [
+                BranchOp(
+                    condition=cond,
+                    then_branch=[ContinueOp(target_loop_id=target_loop)],
+                )
+            ]
         elif isinstance(stmt, ResizeArrayStatement):
             target_id = self.resolve_ref(stmt.array_name)
             size_op = self.lower_expr(stmt.dimensions[0]) if stmt.dimensions else SemanticExpression(op="literal", value=0)
@@ -495,6 +587,67 @@ class SemanticLoweringPass:
                     body=body_ops,
                 )
             ]
+        elif isinstance(stmt, HistogramStatement):
+            self.loop_counter += 1
+            loop_id = f"loop.histogram_{self.loop_counter:03d}"
+            entity_name = stmt.view_name.replace("-VIEW", "")
+            self.loop_stack.append(
+                ActiveLoopContext(
+                    loop_id=loop_id,
+                    label=stmt.label,
+                    entity=entity_name,
+                    view_name=stmt.view_name,
+                    is_histogram=True,
+                )
+            )
+
+            if self.workspace:
+                ddm = self.workspace.get_ddm(stmt.view_name)
+                if ddm:
+                    for field in ddm.inline_fields:
+                        clean_name = field.name.lower()
+                        sym_id = f"sym.entity.{stmt.view_name.lower()}.{clean_name}"
+                        raw_spec = field.format.raw_spec if field.format else "A"
+                        self.symbols[field.name] = Symbol(
+                            id=sym_id,
+                            name=field.name,
+                            scope="entity_field",
+                            semantic_type=self.parse_format(raw_spec),
+                        )
+
+            sym_field = f"sym.entity.{stmt.view_name.lower()}.{stmt.descriptor.lower()}"
+            predicate = SemanticExpression(op="literal", value=True)
+            if stmt.starting_from:
+                start_pred = SemanticExpression(
+                    op="gte",
+                    lhs=SemanticExpression(op="entity_field", symbol_id=sym_field),
+                    rhs=self.lower_expr(stmt.starting_from),
+                )
+                if stmt.thru_value:
+                    thru_pred = SemanticExpression(
+                        op="lte",
+                        lhs=SemanticExpression(op="entity_field", symbol_id=sym_field),
+                        rhs=self.lower_expr(stmt.thru_value),
+                    )
+                    predicate = SemanticExpression(op="and", lhs=start_pred, rhs=thru_pred)
+                else:
+                    predicate = start_pred
+
+            body_ops = self.lower_statements(stmt.body)
+            self.loop_stack.pop()
+
+            op = QueryIterationOp(
+                id=loop_id,
+                label=stmt.label,
+                entity=entity_name,
+                natural_view=stmt.view_name,
+                predicate=predicate,
+                limit=stmt.limit,
+                cardinality="histogram",
+                descriptor=stmt.descriptor,
+                body=body_ops,
+            )
+            return [op]
         elif isinstance(stmt, (FindStatement, ReadStatement)):
             self.loop_counter += 1
             op_name = "find" if isinstance(stmt, FindStatement) else "read"

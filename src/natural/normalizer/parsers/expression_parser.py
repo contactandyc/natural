@@ -32,8 +32,10 @@ expr_grammar = r"""
            | substring_func                          -> substring_expr
            | VAR_NAME "(" RAW_BRACKET ")"            -> var_with_bracket
            | VAR_NAME                                -> var_ref
+           | tuple_expr
            | "(" logical_or ")"
 
+    tuple_expr: "(" expr ("," expr)+ ")"
     substring_func: "SUBSTRING"i "(" VAR_NAME "," expr ("," expr)? ")"
     RAW_BRACKET.2: /[^)]+/
 
@@ -47,7 +49,7 @@ expr_grammar = r"""
     NUMBER.2: /-?\d+(\.\d+)?/
     STRING: /'[^']*'/ | /"[^"]*"/
     DATE_LITERAL: /D'[^']+'/
-    SYSTEM_VAR: /\*[A-Z0-9\-_]+(?:\([A-Za-z0-9\-_.]+\))?/
+    SYSTEM_VAR.2: /\*[A-Z0-9\-_]+(?:\([A-Za-z0-9\-_.]+\))?/
     VAR_NAME: /[*#\+][A-Za-z0-9\-_]+((\.|\/)[A-Za-z0-9\-_]+)*/ | /[A-Za-z0-9\-_]+(\.|\/)[A-Za-z0-9\-_]+/ | /[A-Za-z][A-Za-z0-9\-_]*/
 
     %import common.WS
@@ -76,6 +78,10 @@ class ExpressionTransformer(Transformer):
     def var_ref(self, tokens):
         var_name = str(tokens[0])
         return Expression(kind="ref", value=var_name)
+
+    def tuple_expr(self, children):
+        elements = [c for c in children if isinstance(c, Expression)]
+        return Expression(kind="tuple", array_indices=elements)
 
     def var_with_bracket(self, tokens):
         var_name = str(tokens[0])
