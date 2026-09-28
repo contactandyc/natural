@@ -72,6 +72,7 @@ class Expression(BaseModel):
     left: Optional["Expression"] = None
     right: Optional["Expression"] = None
     array_dim: Optional[str] = None
+    array_indices: List["Expression"] = Field(default_factory=list)
     substring: Optional[SubstringSpec] = None
 
 
@@ -120,8 +121,9 @@ class FindStatement(Statement):
     statement_type: str = "FIND"
     label: Optional[str] = None
     view_name: str
-    descriptor: str
-    operand: Expression
+    descriptor: Optional[str] = None
+    operand: Optional[Expression] = None
+    criteria: Optional[Expression] = None
     limit: Optional[int] = None
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
     on_empty: List[SerializeAsAny[Statement]] = Field(default_factory=list)
@@ -134,6 +136,7 @@ class ReadStatement(Statement):
     descriptor: Optional[str] = None
     by_descriptor: Optional[str] = None
     starting_from: Optional[Expression] = None
+    thru_value: Optional[Expression] = None
     limit: Optional[int] = None
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
 
@@ -152,7 +155,7 @@ class PerformStatement(Statement):
 class LoopStatement(Statement):
     statement_type: str = "REPEAT"
     label: Optional[str] = None
-    loop_type: str = "INFINITE"  # WHILE, UNTIL, INFINITE
+    loop_type: str = "INFINITE"  # WHILE, UNTIL, UNTIL_POST, INFINITE
     condition: Optional[Expression] = None
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
 
@@ -248,6 +251,45 @@ class GetStatement(Statement):
     arguments: List[Expression] = Field(default_factory=list)
 
 
+class GetSameStatement(Statement):
+    statement_type: str = "GET_SAME"
+    view_name: Optional[str] = None
+
+
+class EndTransactionStatement(Statement):
+    statement_type: str = "END_TRANSACTION"
+    operand: Optional[Expression] = None
+
+
+class BackoutTransactionStatement(Statement):
+    statement_type: str = "BACKOUT_TRANSACTION"
+
+
+class StopStatement(Statement):
+    statement_type: str = "STOP"
+
+
+class TerminateStatement(Statement):
+    statement_type: str = "TERMINATE"
+
+
+class AtStartOfDataStatement(Statement):
+    statement_type: str = "AT_START_OF_DATA"
+    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+
+
+class AtEndOfDataStatement(Statement):
+    statement_type: str = "AT_END_OF_DATA"
+    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+
+
+class ResizeArrayStatement(Statement):
+    statement_type: str = "RESIZE_ARRAY"
+    action: str = "RESIZE"
+    array_name: str
+    dimensions: List[Expression] = Field(default_factory=list)
+
+
 class ReadWorkFileStatement(Statement):
     statement_type: str = "READ_WORK_FILE"
     label: Optional[str] = None
@@ -266,9 +308,11 @@ class CloseWorkFileStatement(Statement):
     statement_type: str = "CLOSE_WORK_FILE"
     file_number: int
 
+
 class OnErrorBlockStatement(Statement):
     statement_type: str = "ON_ERROR"
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+
 
 class SubroutineDefinition(BaseModel):
     name: str

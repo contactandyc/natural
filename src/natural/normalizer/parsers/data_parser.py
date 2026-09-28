@@ -18,7 +18,7 @@ from natural.ir.models import (
 class DataBlockParser:
     def __init__(self):
         self.field_pattern = re.compile(
-            r"^\s*(\d{1,2})\s+([*#\+A-Za-z0-9\-_]+)(?:\s*\(([^)]+)\))?(?:\s+INIT\s*<?([^>]+)?>?)?\s*$",
+            r"^\s*(\d{1,2})\s+([*#\+A-Za-z0-9\-_]+)(?:\s*\(([^)]+)\))?(?:\s+DYNAMIC)?(?:\s+INIT\s*<?([^>]+)?>?)?\s*$",
             re.IGNORECASE,
         )
         self.redefine_pattern = re.compile(
@@ -123,7 +123,8 @@ class DataBlockParser:
         if not raw_fmt:
             return FieldFormat(kind="unknown", raw_spec="")
 
-        kind_char = raw_fmt[0].upper()
+        clean_spec = raw_fmt.upper().replace("DYNAMIC", "").strip()
+        kind_char = clean_spec[0] if clean_spec else "A"
         kind_map = {
             "A": "alphanumeric",
             "P": "packed_decimal",
@@ -136,7 +137,7 @@ class DataBlockParser:
         kind = kind_map.get(kind_char, "unknown")
         fmt = FieldFormat(kind=kind, raw_spec=raw_fmt)
 
-        match = re.match(r"^[A-Z](\d*)(?:\.(\d+))?$", raw_fmt, re.IGNORECASE)
+        match = re.match(r"^[A-Z](\d*)(?:\.(\d+))?$", clean_spec, re.IGNORECASE)
         if match:
             if match.group(1):
                 fmt.length = int(match.group(1))

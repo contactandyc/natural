@@ -1,123 +1,267 @@
 # tests/test_fixtures.py
-from pathlib import Path
+# SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
 import difflib
-import yaml
+import importlib
+import re
+import sys
+from decimal import Decimal
+from pathlib import Path
+from typing import Dict, Tuple
+
 import pytest
+import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
-from decimal import Decimal
 
-from natural.normalizer.pass1_parser import Pass1Parser
-from natural.normalizer.pass2_dispatcher import Pass2Dispatcher
-from natural.normalizer.lowering import SemanticLoweringPass
-from natural.normalizer.workspace import Workspace
-from natural.ir.serializer import serialize_to_yaml
-from natural.codegen.python_emitter import PythonEmitter
+from natural.orchestrator.builder import ProjectBuilder
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 console = Console()
 
+HEADER_RE = re.compile(r"^===\s*([A-Za-z0-9_-]+)(?::\s*([^=\n]+?))?\s*===$")
 
-def parse_fixture(raw_text: str):
-    sections = {}
-    current_key = None
+
+def parse_fixture(raw_text: str, default_stem: str) -> Tuple[Dict[str, str], Dict[str, str], str, bool, bool]:
+    natural_files: Dict[str, str] = {}
+    python_files: Dict[str, str] = {}
+    execute_yaml = ""
+
+    has_explicit_natural_names = False
+    has_explicit_python_names = False
+
+    current_kind = None
+    current_name = None
     buffer = []
 
+    def flush():
+        nonlocal buffer, has_explicit_natural_names, has_explicit_python_names, execute_yaml
+        if current_kind == "NATURAL":
+            if current_name:
+                has_explicit_natural_names = True
+                fname = current_name
+            else:
+                fname = f"{default_stem}.nsp"
+            natural_files[fname] = "\n".join(buffer).strip()
+        elif current_kind == "PYTHON":
+            if current_name:
+                has_explicit_python_names = True
+                fname = current_name
+            else:
+                fname = f"{default_stem.lower().replace('-', '_')}.py"
+            python_files[fname] = "\n".join(buffer).strip()
+        elif current_kind == "EXECUTE":
+            execute_yaml = "\n".join(buffer).strip()
+        buffer = []
+
     for line in raw_text.splitlines():
-        if line.startswith("=== ") and line.endswith(" ==="):
-            if current_key:
-                sections[current_key] = "\n".join(buffer).strip()
-            current_key = line.strip("= ").strip().upper()
-            buffer = []
+        m = HEADER_RE.match(line.strip())
+        if m:
+            flush()
+            current_kind = m.group(1).upper()
+            current_name = m.group(2).strip() if m.group(2) else None
         else:
             buffer.append(line)
-    if current_key:
-        sections[current_key] = "\n".join(buffer).strip()
+    flush()
 
-    return (
-        sections.get("NATURAL", ""),
-        sections.get("PYTHON", ""),
-        sections.get("EXECUTE", ""),
-    )
+    return natural_files, python_files, execute_yaml, has_explicit_natural_names, has_explicit_python_names
+
+
+def serialize_fixture(
+        natural_files: Dict[str, str],
+        python_files: Dict[str, str],
+        execute_yaml: str,
+        has_explicit_natural_names: bool,
+        has_explicit_python_names: bool,
+) -> str:
+    sections = []
+
+    if not has_explicit_natural_names and len(natural_files) == 1:
+        content = list(natural_files.values())[0]
+        sections.append(f"=== NATURAL ===\n{content}")
+    else:
+        for fname, content in natural_files.items():
+            sections.append(f"=== NATURAL: {fname} ===\n{content}")
+
+    if not has_explicit_python_names and len(python_files) == 1:
+        content = list(python_files.values())[0]
+        sections.append(f"=== PYTHON ===\n{content}")
+    else:
+        for fname in sorted(python_files.keys()):
+            sections.append(f"=== PYTHON: {fname} ===\n{python_files[fname]}")
+
+    if execute_yaml:
+        sections.append(f"=== EXECUTE ===\n{execute_yaml}")
+
+    return "\n\n".join(sections).strip() + "\n"
 
 
 @pytest.mark.parametrize("fixture_path", list(FIXTURE_DIR.glob("*.test")), ids=lambda p: p.stem)
-def test_pipeline_and_execution(fixture_path: Path, request):
+def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
     bless_enabled = request.config.getoption("--bless", default=False)
     verbose_enabled = request.config.getoption("--verbose-test", default=False)
     content = fixture_path.read_text(encoding="utf-8")
-    natural_src, expected_py, execute_yaml = parse_fixture(content)
+
+    natural_files, expected_py_files, execute_yaml, has_exp_nat, has_exp_py = parse_fixture(
+        content, fixture_path.stem
+    )
 
     if verbose_enabled:
         console.print(f"\n[bold magenta]═════════ Running Fixture: {fixture_path.name} ═════════[/bold magenta]")
-        console.print(Panel(Syntax(natural_src, "text", line_numbers=True), title="[bold cyan]1. Natural Input[/bold cyan]"))
+        for fname, n_src in natural_files.items():
+            console.print(Panel(Syntax(n_src, "text", line_numbers=True), title=f"[bold cyan]Input: {fname}[/bold cyan]"))
 
-    # 1. Compile Natural to Python
-    workspace = Workspace(include_dirs=[])
-    p1 = Pass1Parser(workspace)
-    p2 = Pass2Dispatcher()
+    # 1. Populate workspace in tmp_path
+    for fname, n_src in natural_files.items():
+        (tmp_path / fname).write_text(n_src, encoding="utf-8")
 
-    pass1_ast = p1.parse(natural_src, module_name=fixture_path.stem)
-    ir0 = p2.lower_module(pass1_ast)
+    # 2. Compile workspace
+    builder = ProjectBuilder(tmp_path)
+    builder.compile_workspace(show_diff=False, emit_main=False)
+
+    py_dir = tmp_path / "build" / "python"
+    actual_py_files: Dict[str, str] = {}
+    for p in py_dir.glob("*.py"):
+        actual_py_files[p.name] = p.read_text(encoding="utf-8").strip()
+
+    # Determine files to verify
+    module_stems = {
+        Path(f).stem.lower().replace("-", "_")
+        for f in natural_files
+        if Path(f).suffix.lower() in (".nsp", ".nsn")
+    }
+
+    relevant_py_files: Dict[str, str] = {}
+    for stem in module_stems:
+        py_name = f"{stem}.py"
+        if py_name in actual_py_files:
+            relevant_py_files[py_name] = actual_py_files[py_name]
+
+    if "target_orm.py" in expected_py_files:
+        if "target_orm.py" in actual_py_files:
+            relevant_py_files["target_orm.py"] = actual_py_files["target_orm.py"]
+
     if verbose_enabled:
-        console.print(Panel(Syntax(serialize_to_yaml(ir0), "yaml", line_numbers=True), title="[bold green]2. IR-0 (AST)[/bold green]"))
+        for py_name, py_src in relevant_py_files.items():
+            console.print(Panel(Syntax(py_src, "python", line_numbers=True), title=f"[bold blue]Emitted: {py_name}[/bold blue]"))
 
-    ir1 = SemanticLoweringPass(ir0, workspace=workspace).lower()
-    if verbose_enabled:
-        console.print(Panel(Syntax(serialize_to_yaml(ir1), "yaml", line_numbers=True), title="[bold yellow]3. IR-1 (Semantic)[/bold yellow]"))
+    # 3. Check / Bless Python Source
+    diffs = []
+    for expected_name, expected_code in expected_py_files.items():
+        actual_code = relevant_py_files.get(expected_name, "")
+        if actual_code != expected_code:
+            diff = "\n".join(
+                difflib.unified_diff(
+                    expected_code.splitlines(),
+                    actual_code.splitlines(),
+                    fromfile=f"expected/{expected_name}",
+                    tofile=f"actual/{expected_name}",
+                    lineterm="",
+                )
+            )
+            diffs.append(diff)
 
-    actual_py = PythonEmitter(ir1).generate(emit_main=False).strip()
-    if verbose_enabled:
-        console.print(Panel(Syntax(actual_py, "python", line_numbers=True), title="[bold blue]4. Emitted Python[/bold blue]"))
+    for actual_name in relevant_py_files:
+        if actual_name not in expected_py_files:
+            diffs.append(f"Missing expected snapshot for emitted file: {actual_name}")
 
-    # 2. Check / Bless Python Source
-    if bless_enabled and actual_py != expected_py:
-        exec_part = f"\n\n=== EXECUTE ===\n{execute_yaml}\n" if execute_yaml else "\n"
-        new_content = f"=== NATURAL ===\n{natural_src}\n\n=== PYTHON ===\n{actual_py}{exec_part}"
-        fixture_path.write_text(new_content, encoding="utf-8")
-        expected_py = actual_py
-    else:
-        if actual_py != expected_py:
-            diff = "\n".join(difflib.unified_diff(
-                expected_py.splitlines(),
-                actual_py.splitlines(),
-                fromfile="expected",
-                tofile="actual",
-                lineterm=""
-            ))
-            assert False, f"Code generation mismatch in {fixture_path.name}:\n{diff}"
+    if diffs:
+        if bless_enabled:
+            new_content = serialize_fixture(
+                natural_files,
+                relevant_py_files,
+                execute_yaml,
+                has_exp_nat,
+                has_exp_py or len(relevant_py_files) > 1,
+                )
+            fixture_path.write_text(new_content, encoding="utf-8")
+        else:
+            diff_report = "\n\n".join(diffs)
+            assert False, f"Code generation mismatch in {fixture_path.name}:\n{diff_report}"
 
-    # 3. Dynamic Execution & Assertions
+    # 4. Dynamic Execution & Assertions
     if not execute_yaml:
         return
 
-    test_cases = yaml.safe_load(execute_yaml)
-    if not isinstance(test_cases, list):
+    test_data = yaml.safe_load(execute_yaml)
+    if isinstance(test_data, dict):
+        entrypoint_candidate = test_data.get("entrypoint")
+        test_cases = test_data.get("cases", [])
+    elif isinstance(test_data, list):
+        entrypoint_candidate = None
+        test_cases = test_data
+    else:
         return
 
-    mod_scope = {}
-    exec(actual_py, mod_scope)
+    # Resolve entrypoint module
+    fixture_stem = fixture_path.stem.lower().replace("-", "_")
+    if entrypoint_candidate:
+        entrypoint_stem = entrypoint_candidate.lower().replace("-", "_")
+    elif fixture_stem in module_stems:
+        entrypoint_stem = fixture_stem
+    else:
+        nsp_stems = [
+            Path(f).stem.lower().replace("-", "_")
+            for f in natural_files
+            if f.lower().endswith(".nsp")
+        ]
+        entrypoint_stem = nsp_stems[0] if nsp_stems else sorted(module_stems)[0]
 
-    module_stem = fixture_path.stem.lower().replace("-", "_")
-    func_name = f"execute_{module_stem}"
-    execute_func = mod_scope.get(func_name)
-    assert execute_func is not None, f"Expected entrypoint function '{func_name}' not generated"
+    # Prepend build output directory to sys.path
+    py_dir_str = str(py_dir.resolve())
+    if py_dir_str not in sys.path:
+        sys.path.insert(0, py_dir_str)
 
-    ctx_class_name = "".join(part.title() for part in module_stem.split("_")) + "Context"
-    ctx_class = mod_scope.get(ctx_class_name)
-    assert ctx_class is not None, f"Expected context class '{ctx_class_name}' not found"
+    # Invalidate cached module imports for clean fixture isolation
+    for stem in module_stems | {"target_orm"}:
+        if stem in sys.modules:
+            del sys.modules[stem]
+
+    entrypoint_mod = importlib.import_module(entrypoint_stem)
+
+    func_name = f"execute_{entrypoint_stem}"
+    execute_func = getattr(entrypoint_mod, func_name, None)
+    assert execute_func is not None, f"Expected entrypoint function '{func_name}' not found in {entrypoint_stem}.py"
+
+    ctx_class_name = "".join(part.title() for part in entrypoint_stem.split("_")) + "Context"
+    ctx_class = getattr(entrypoint_mod, ctx_class_name, None)
+    assert ctx_class is not None, f"Expected context class '{ctx_class_name}' not found in {entrypoint_stem}.py"
+
+    class MockQuery(list):
+        def filter(self, *args, **kwargs):
+            return self
+
+        def limit(self, *args, **kwargs):
+            return self
 
     class MockSession:
-        def query(self, *args, **kwargs): return []
-        def add(self, *args): pass
-        def delete(self, *args): pass
-        def flush(self): pass
+        def query(self, *args, **kwargs):
+            return MockQuery()
+
+        def add(self, *args):
+            pass
+
+        def delete(self, *args):
+            pass
+
+        def flush(self):
+            pass
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def refresh(self, *args):
+            pass
 
     session = MockSession()
 
     if verbose_enabled:
-        console.print("[bold cyan]5. Executing Test Cases:[/bold cyan]")
+        console.print(f"[bold cyan]5. Executing Test Cases against '{entrypoint_stem}.py':[/bold cyan]")
 
     for i, case in enumerate(test_cases, 1):
         ctx = ctx_class()
@@ -136,7 +280,9 @@ def test_pipeline_and_execution(fixture_path: Path, request):
         for expected_field, expected_val in case.get("expected", {}).items():
             actual_val = getattr(result_ctx, expected_field)
             if verbose_enabled:
-                console.print(f"  • Case #{i} | Input: {case.get('input')} ➔ {expected_field} = [bold green]{actual_val!r}[/bold green] (expected: {expected_val!r})")
+                console.print(
+                    f"  • Case #{i} | Input: {case.get('input')} ➔ {expected_field} = [bold green]{actual_val!r}[/bold green] (expected: {expected_val!r})"
+                )
 
             assert str(actual_val) == str(expected_val), (
                 f"Case #{i} in {fixture_path.name} failed: "

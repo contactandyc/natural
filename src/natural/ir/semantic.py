@@ -110,6 +110,44 @@ class CallSubroutineOp(SemanticStatement):
     subroutine_name: str
 
 
+class CallProgramOp(SemanticStatement):
+    op: str = "call_program"
+    program_name: str
+    parameters: List[SemanticExpression] = Field(default_factory=list)
+
+
+class TransactionOp(SemanticStatement):
+    op: str = "transaction"
+    action: str  # "commit" or "rollback"
+
+
+class EntityRefreshOp(SemanticStatement):
+    op: str = "entity_refresh"
+    target_loop_id: Optional[str] = None
+    entity: Optional[str] = None
+
+
+class TerminateOp(SemanticStatement):
+    op: str = "terminate"
+    exit_code: int = 0
+
+
+class AtStartOfDataOp(SemanticStatement):
+    op: str = "at_start_of_data"
+    body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
+
+
+class AtEndOfDataOp(SemanticStatement):
+    op: str = "at_end_of_data"
+    body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
+
+
+class ResizeArrayOp(SemanticStatement):
+    op: str = "resize_array"
+    target_id: str
+    size: SemanticExpression
+
+
 class CompressOp(SemanticStatement):
     op: str = "compress"
     target_id: str
@@ -202,9 +240,11 @@ class SubroutineBlockOp(BaseModel):
     name: str
     operations: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
 
+
 class OnErrorOp(SemanticStatement):
     op: str = "on_error"
     body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
+
 
 class SemanticModule(BaseModel):
     ir_version: str = "1.0"

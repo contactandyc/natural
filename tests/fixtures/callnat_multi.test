@@ -1,0 +1,43 @@
+=== NATURAL: MAIN.nsp ===
+DEFINE DATA LOCAL
+1 #VAL (I4)
+1 #RES (I4)
+END-DEFINE
+#VAL := 21
+CALLNAT 'DOUBLER' #VAL #RES
+
+=== NATURAL: DOUBLER.nsn ===
+DEFINE DATA PARAMETER
+1 #VAL (I4)
+1 #RES (I4)
+END-DEFINE
+#RES := #VAL * 2
+
+=== PYTHON: doubler.py ===
+class DoublerContext:
+    def __init__(self):
+        self.val = 0
+        self.res = 0
+
+def execute_doubler(ctx: DoublerContext, session):
+    ctx.res = (ctx.val * 2)
+    return ctx
+
+=== PYTHON: main.py ===
+from doubler import execute_doubler
+
+class MainContext:
+    def __init__(self):
+        self.val = 0
+        self.res = 0
+
+def execute_main(ctx: MainContext, session):
+    ctx.val = 21
+    execute_doubler(ctx, session)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    val: 21
+  expected:
+    res: 42

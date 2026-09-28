@@ -14,6 +14,8 @@ module: statement*
       | subroutine_block
       | read_work_block
       | on_error_block
+      | at_start_block
+      | at_end_block
 
 define_data_block: _DEFINE_DATA RAW_DATA_CONTENT? _END_DEFINE
 _DEFINE_DATA: /DEFINE\s+DATA/i
@@ -69,9 +71,17 @@ on_error_block: _ON_ERROR statement* _END_ERROR
 _ON_ERROR.3: /ON\s+ERROR\b/i
 _END_ERROR.3: /END-ERROR\b/i
 
+at_start_block: _AT_START statement* _END_START
+_AT_START: /AT\s+START\s+(?:OF\s+)?DATA\b/i
+_END_START: /END-START\b/i
+
+at_end_block: _AT_END statement* _END_END
+_AT_END: /AT\s+END\s+(?:OF\s+)?DATA\b/i
+_END_END: /END-END\b/i
+
 label: /[A-Za-z0-9\-_]+\./
 
-raw_statement: /(?!(?i:\s*(?:END-(?:FIND|IF|REPEAT|FOR|READ|DEFINE|DECIDE|SUBROUTINE|WORK|ERROR)|UNTIL|ELSE|FIND|IF|REPEAT|FOR|READ|DEFINE|DECIDE|VALUE|WHEN|NONE|ANY|ON\s+ERROR)\b))[^\n]+/
+raw_statement: /(?!(?i:\s*(?:END-(?:FIND|IF|REPEAT|FOR|READ|DEFINE|DECIDE|SUBROUTINE|WORK|ERROR|START|END)|UNTIL|ELSE|FIND|IF|REPEAT|FOR|READ|DEFINE|DECIDE|VALUE|WHEN|NONE|ANY|ON\s+ERROR|AT\s+START|AT\s+END)\b))[^\n]+/
 raw_clause: /[^\n]+/
 
 %import common.WS

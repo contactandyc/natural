@@ -1,0 +1,24 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #STATUS (A10)
+END-DEFINE
+#STATUS := 'COMMITTED'
+END TRANSACTION
+BACKOUT TRANSACTION
+
+=== PYTHON ===
+class TransactionContext:
+    def __init__(self):
+        self.status = ""
+
+def execute_transaction(ctx: TransactionContext, session):
+    ctx.status = 'COMMITTED'
+    session.commit()
+    session.rollback()
+    return ctx
+
+=== EXECUTE ===
+- input:
+    status: "PENDING"
+  expected:
+    status: "COMMITTED"

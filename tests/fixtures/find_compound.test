@@ -1,0 +1,39 @@
+=== NATURAL: TARIFF-VIEW.ddm ===
+1 AC CLASS                               A    4  N N
+1 AD ZONE                                A    6  N N
+1 AE RATE                                P  7.2  N N
+1 AF WEIGHT-LIMIT                        P  7.2  N N
+
+=== NATURAL: FIND_COMP.nsp ===
+DEFINE DATA
+LOCAL
+  1 #CLASS (A4)
+  1 #ZONE  (A6)
+  1 #CHARGE (P7.2)
+END-DEFINE
+FIND (1) TARIFF-VIEW WITH (CLASS = #CLASS AND ZONE = #ZONE) OR WEIGHT-LIMIT > 500
+  #CHARGE := RATE
+END-FIND
+
+=== PYTHON: find_comp.py ===
+from decimal import Decimal
+from target_orm import Tariff
+
+class FindCompContext:
+    def __init__(self):
+        self.class_ = ""
+        self.zone = ""
+        self.charge = Decimal('0')
+
+def execute_find_comp(ctx: FindCompContext, session):
+    for loop_idx, record in enumerate(session.query(Tariff).filter((((Tariff.class_ == ctx.class_) and (Tariff.zone == ctx.zone)) or (Tariff.weight_limit > 500))).limit(1), 1):
+        loop_counter = loop_idx
+        ctx.charge = record.rate
+    return ctx
+
+=== EXECUTE ===
+- input:
+    class_: "AIR"
+    zone: "EAST"
+  expected:
+    charge: "0"

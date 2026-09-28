@@ -33,7 +33,7 @@ class ReadBlock(BlockNode):
 
 
 class RepeatBlock(BlockNode):
-    pass
+    is_post_test: bool = False
 
 
 class ForBlock(BlockNode):
@@ -68,6 +68,14 @@ class SubroutineBlock(Pass1Node):
 
 
 class OnErrorBlock(Pass1Node):
+    body: List[Any] = Field(default_factory=list)
+
+
+class AtStartBlock(Pass1Node):
+    body: List[Any] = Field(default_factory=list)
+
+
+class AtEndBlock(Pass1Node):
     body: List[Any] = Field(default_factory=list)
 
 

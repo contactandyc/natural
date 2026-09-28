@@ -20,9 +20,18 @@ from natural.ir.models import (
     ExamineStatement,
     ResetStatement,
     PerformStatement,
+    CallnatStatement,
     UpdateStatement,
     DeleteStatement,
     StoreStatement,
+    GetSameStatement,
+    EndTransactionStatement,
+    BackoutTransactionStatement,
+    StopStatement,
+    TerminateStatement,
+    AtStartOfDataStatement,
+    AtEndOfDataStatement,
+    ResizeArrayStatement,
     ReadWorkFileStatement,
     WriteWorkFileStatement,
     CloseWorkFileStatement,
@@ -48,6 +57,13 @@ from natural.ir.semantic import (
     MoveAllOp,
     ResetOp,
     CallSubroutineOp,
+    CallProgramOp,
+    TransactionOp,
+    EntityRefreshOp,
+    TerminateOp,
+    AtStartOfDataOp,
+    AtEndOfDataOp,
+    ResizeArrayOp,
     EntityUpdateOp,
     EntityStoreOp,
     EntityDeleteOp,
@@ -88,7 +104,8 @@ class SemanticLoweringPass:
             storage = "packed_decimal" if kind == "P" else "unpacked_decimal"
             return SemanticType(base="decimal", precision=prec, scale=scale, storage=storage)
         elif kind == "A":
-            length = int(raw_fmt[1:]) if raw_fmt[1:].isdigit() else 0
+            clean_len = raw_fmt[1:].replace("DYNAMIC", "").strip()
+            length = int(clean_len) if clean_len.isdigit() else 0
             return SemanticType(base="string", length=length, storage="alphanumeric")
         elif kind == "D":
             return SemanticType(base="date", length=8, storage="date")
@@ -163,12 +180,10 @@ class SemanticLoweringPass:
 
         clean = name.split(".")[-1].lower().replace("#", "")
 
-        # Check local and parameter symbols
         for sym in self.symbols.values():
             if sym.name.lower().replace("#", "") == clean:
                 return sym.id
 
-        # Check active loop database view
         for ctx in reversed(self.loop_stack):
             if ctx.view_name and self.workspace:
                 ddm = self.workspace.get_ddm(ctx.view_name)
@@ -177,7 +192,6 @@ class SemanticLoweringPass:
                         if f.name.lower() == clean:
                             return f"sym.entity.{ctx.view_name.lower()}.{clean}"
 
-        # Check qualified view access: VIEW.FIELD
         if "." in name:
             parts = name.split(".")
             v_name, f_name = parts[0], parts[1]
@@ -193,9 +207,11 @@ class SemanticLoweringPass:
                     start=self.lower_expr(expr.substring.start),
                     length=self.lower_expr(expr.substring.length) if expr.substring.length else None,
                 )
+            arr_indices = [self.lower_expr(idx) for idx in getattr(expr, "array_indices", [])]
             return SemanticExpression(
                 op="ref",
                 symbol_id=self.resolve_ref(str(expr.value)),
+                array_indices=arr_indices,
                 substring=sub_op,
             )
         elif expr.kind == "literal":
@@ -247,10 +263,12 @@ class SemanticLoweringPass:
                     start=self.lower_expr(stmt.target.substring.start),
                     length=self.lower_expr(stmt.target.substring.length) if stmt.target.substring.length else None,
                 )
+            target_indices = [self.lower_expr(idx) for idx in getattr(stmt.target, "array_indices", [])]
             return [
                 AssignOp(
                     target_id=target_id,
                     target_substring=target_sub,
+                    target_indices=target_indices,
                     expr=self.lower_expr(stmt.value),
                     rounded=stmt.rounded,
                 )
@@ -264,6 +282,7 @@ class SemanticLoweringPass:
                     start=self.lower_expr(stmt.target.substring.start),
                     length=self.lower_expr(stmt.target.substring.length) if stmt.target.substring.length else None,
                 )
+            target_indices = [self.lower_expr(idx) for idx in getattr(stmt.target, "array_indices", [])]
 
             if stmt.is_move_all:
                 return [
@@ -277,6 +296,7 @@ class SemanticLoweringPass:
                 AssignOp(
                     target_id=target_id,
                     target_substring=target_sub,
+                    target_indices=target_indices,
                     expr=self.lower_expr(stmt.source),
                     edit_mask=stmt.edit_mask,
                 )
@@ -320,6 +340,30 @@ class SemanticLoweringPass:
             return ops
         elif isinstance(stmt, PerformStatement):
             return [CallSubroutineOp(subroutine_name=stmt.subroutine_name)]
+        elif isinstance(stmt, CallnatStatement):
+            param_exprs = [self.lower_expr(p) for p in stmt.parameters]
+            return [CallProgramOp(program_name=stmt.subprogram_name, parameters=param_exprs)]
+        elif isinstance(stmt, EndTransactionStatement):
+            return [TransactionOp(action="commit")]
+        elif isinstance(stmt, BackoutTransactionStatement):
+            return [TransactionOp(action="rollback")]
+        elif isinstance(stmt, (StopStatement, TerminateStatement)):
+            return [TerminateOp(exit_code=0)]
+        elif isinstance(stmt, GetSameStatement):
+            matched_entity = "active_record"
+            for ctx in reversed(self.loop_stack):
+                if ctx.entity:
+                    matched_entity = ctx.entity
+                    break
+            return [EntityRefreshOp(target_loop_id=self._resolve_target_loop(None), entity=matched_entity)]
+        elif isinstance(stmt, AtStartOfDataStatement):
+            return [AtStartOfDataOp(body=self.lower_statements(stmt.body))]
+        elif isinstance(stmt, AtEndOfDataStatement):
+            return [AtEndOfDataOp(body=self.lower_statements(stmt.body))]
+        elif isinstance(stmt, ResizeArrayStatement):
+            target_id = self.resolve_ref(stmt.array_name)
+            size_op = self.lower_expr(stmt.dimensions[0]) if stmt.dimensions else SemanticExpression(op="literal", value=0)
+            return [ResizeArrayOp(target_id=target_id, size=size_op)]
         elif isinstance(stmt, OnErrorBlockStatement):
             return [OnErrorOp(body=self.lower_statements(stmt.body))]
         elif isinstance(stmt, UpdateStatement):
@@ -421,11 +465,12 @@ class SemanticLoweringPass:
             body_ops = self.lower_statements(stmt.body)
 
             self.loop_stack.pop()
+            l_type = stmt.loop_type.lower() if hasattr(stmt, "loop_type") else ("until" if cond else "infinite")
             return [
                 LoopOp(
                     id=loop_id,
                     label=stmt.label,
-                    loop_type=stmt.loop_type.lower() if hasattr(stmt, "loop_type") else ("until" if cond else "infinite"),
+                    loop_type=l_type,
                     condition=cond,
                     body=body_ops,
                 )
@@ -477,26 +522,39 @@ class SemanticLoweringPass:
             cardinality = "one" if limit_val == 1 else "many"
 
             if isinstance(stmt, FindStatement):
-                predicate = SemanticExpression(
-                    op="eq",
-                    lhs=SemanticExpression(
-                        op="entity_field",
-                        symbol_id=f"sym.entity.{stmt.view_name.lower()}.{stmt.descriptor.lower()}",
-                    ),
-                    rhs=self.lower_expr(stmt.operand),
-                )
+                if getattr(stmt, "criteria", None):
+                    predicate = self.lower_expr(stmt.criteria)
+                elif stmt.descriptor and stmt.operand:
+                    predicate = SemanticExpression(
+                        op="eq",
+                        lhs=SemanticExpression(
+                            op="entity_field",
+                            symbol_id=f"sym.entity.{stmt.view_name.lower()}.{stmt.descriptor.lower()}",
+                        ),
+                        rhs=self.lower_expr(stmt.operand),
+                    )
+                else:
+                    predicate = SemanticExpression(op="literal", value=True)
                 on_empty = self.lower_statements(stmt.on_empty)
             else:
                 predicate = SemanticExpression(op="literal", value=True)
-                if getattr(stmt, "starting_from", None) and getattr(stmt, "by_descriptor", None):
-                    predicate = SemanticExpression(
+                desc = getattr(stmt, "by_descriptor", None)
+                if desc and getattr(stmt, "starting_from", None):
+                    sym_field = f"sym.entity.{stmt.view_name.lower()}.{desc.lower()}"
+                    start_pred = SemanticExpression(
                         op="gte",
-                        lhs=SemanticExpression(
-                            op="entity_field",
-                            symbol_id=f"sym.entity.{stmt.view_name.lower()}.{stmt.by_descriptor.lower()}",
-                        ),
+                        lhs=SemanticExpression(op="entity_field", symbol_id=sym_field),
                         rhs=self.lower_expr(stmt.starting_from),
                     )
+                    if getattr(stmt, "thru_value", None):
+                        thru_pred = SemanticExpression(
+                            op="lte",
+                            lhs=SemanticExpression(op="entity_field", symbol_id=sym_field),
+                            rhs=self.lower_expr(stmt.thru_value),
+                        )
+                        predicate = SemanticExpression(op="and", lhs=start_pred, rhs=thru_pred)
+                    else:
+                        predicate = start_pred
                 on_empty = []
 
             body_ops = self.lower_statements(stmt.body)

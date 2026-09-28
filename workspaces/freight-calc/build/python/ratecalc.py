@@ -57,8 +57,10 @@ if __name__ == "__main__":
             return MockQuery()
         def add(self, obj): pass
         def delete(self, obj): pass
-        def flush(self):
-            pass
+        def flush(self): pass
+        def commit(self): pass
+        def rollback(self): pass
+        def refresh(self, obj): pass
 
     session = MockSession()
     result = execute_ratecalc(ctx, session)

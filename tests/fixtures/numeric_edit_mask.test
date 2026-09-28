@@ -1,0 +1,29 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #AMT (P7.2)
+1 #AMT_STR (A20)
+END-DEFINE
+MOVE EDITED #AMT TO #AMT_STR (EM=ZZZ,ZZ9.99-)
+
+=== PYTHON ===
+from decimal import Decimal
+
+class NumericEditMaskContext:
+    def __init__(self):
+        self.amt = Decimal('0')
+        self.amt_str = ""
+
+def execute_numeric_edit_mask(ctx: NumericEditMaskContext, session):
+    ctx.amt_str = f"{abs(ctx.amt):,.2f}{'-' if ctx.amt < 0 else ''}"
+    return ctx
+
+=== EXECUTE ===
+- input:
+    amt: "12345.67"
+  expected:
+    amt_str: "12,345.67"
+
+- input:
+    amt: "-450.50"
+  expected:
+    amt_str: "450.50-"

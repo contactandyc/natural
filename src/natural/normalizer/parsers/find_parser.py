@@ -1,59 +1,47 @@
+# SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+# Maintainer: Andy Curtis <contactandyc@gmail.com>
+
 import re
-from lark import Lark, Transformer
 from natural.ir.models import FindStatement, Expression
+from natural.normalizer.parsers.expression_parser import ExpressionParser
 
-find_grammar = r"""
-    ?start: find_clause
-    
-    // e.g. "(1) EMP-VIEW WITH NAME = #INPUT-ID"
-    find_clause: [limit] view_name "WITH" descriptor "=" operand
-    
-    limit: "(" NUMBER ")"
-    view_name: /[A-Z0-9\-\_]+/
-    descriptor: /[A-Z0-9\-\_]+/
-    operand: /[A-Z0-9\-\_\#]+/ | NUMBER | STRING
-    
-    NUMBER: /\d+/
-    STRING: /'[^']*'/
-    
-    %import common.WS
-    %ignore WS
-"""
-
-class FindTransformer(Transformer):
-    def limit(self, tokens):
-        return int(tokens[0])
-
-    def view_name(self, tokens):
-        return str(tokens[0])
-
-    def descriptor(self, tokens):
-        return str(tokens[0])
-
-    def operand(self, tokens):
-        val = str(tokens[0])
-        kind = "literal" if val.isdigit() or val.startswith("'") else "ref"
-        return Expression(kind=kind, value=val.strip("'"))
-
-    def find_clause(self, children):
-        # If limit is present, it's children[0], else handle offset
-        has_limit = isinstance(children[0], int)
-        idx = 1 if has_limit else 0
-
-        return FindStatement(
-            view_name=children[idx],
-            descriptor=children[idx+1],
-            operand=children[idx+2],
-            body=[],      # Filled later by the dispatcher
-            on_empty=[]   # Filled later by the dispatcher
-        )
 
 class FindParser:
     def __init__(self):
-        self.parser = Lark(find_grammar, parser="lalr")
-        self.transformer = FindTransformer()
+        self.expr_parser = ExpressionParser()
+        self.pattern = re.compile(
+            r"^\s*(?:\((\d+)\)\s+)?([A-Za-z0-9\-_]+)(?:\s+WITH\s+(.+))?\s*$",
+            re.IGNORECASE | re.DOTALL,
+            )
 
     def parse(self, raw_clause: str) -> FindStatement:
-        clean_clause = re.sub(r"/\*.*$", "", raw_clause).strip()
-        tree = self.parser.parse(clean_clause)
-        return self.transformer.transform(tree)
+        clean = re.sub(r"/\*.*$", "", raw_clause).strip()
+        m = self.pattern.match(clean)
+        if not m:
+            raise ValueError(f"Invalid FIND syntax: {raw_clause}")
+
+        limit = int(m.group(1)) if m.group(1) else None
+        view_name = m.group(2).upper()
+        criteria_str = m.group(3).strip() if m.group(3) else None
+
+        criteria_expr = None
+        descriptor = None
+        operand = None
+
+        if criteria_str:
+            criteria_expr = self.expr_parser.parse(criteria_str)
+            if criteria_expr.kind == "binary_op" and criteria_expr.operator == "=":
+                if criteria_expr.left and criteria_expr.left.kind == "ref":
+                    descriptor = str(criteria_expr.left.value)
+                    operand = criteria_expr.right
+
+        return FindStatement(
+            view_name=view_name,
+            descriptor=descriptor or "",
+            operand=operand or criteria_expr or Expression(kind="literal", value=True),
+            criteria=criteria_expr,
+            limit=limit,
+            body=[],
+            on_empty=[],
+        )

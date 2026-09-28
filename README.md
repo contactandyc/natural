@@ -485,3 +485,68 @@ Added 8 end-to-end test fixtures covering:
 
 * **Numeric & Currency Edit Masks:**
 * Extend `PythonEmitter._convert_edit_mask()` beyond date patterns (`YYYYMMDD`) to parse numeric formatting strings: `(EM=ZZZ,ZZ9.99-)`, leading zero suppressions, and currency indicators.
+
+
+---
+# Chat https://share.gemini.google/Cg6ZzRT29xob
+
+This commit transitions the compiler from a single-file prototype into an end-to-end multi-module compiler with expanded Adabas transaction handling, compound query lowering, correct loop semantics, and a multi-file integration test harness.
+
+---
+
+---
+
+### Core Areas of Change
+
+#### 1. Database Access & Adabas Transactions
+
+* **Transaction Control Primitives:** Added AST/IR nodes and codegen for `END TRANSACTION` (`session.commit()`) and `BACKOUT TRANSACTION` (`session.rollback()`).
+* **Active Record Refresh:** Added `GET SAME` support, lowering to `session.refresh(record)`.
+* **Compound Search & Descriptor Ranges:**
+* Replaced the single-equality `FIND` parser with full boolean expression parsing (`WITH (CLASS = #A AND ZONE = #B) OR ...`).
+* Added `THRU` range filtering to `READ` clauses (`STARTING FROM ... THRU ...`), lowering to composite SQL `>=` and `<=` range criteria.
+
+
+* **Loop Demarcation Hooks:** Added island grammar blocks and lowering for `AT START OF DATA` (`if loop_idx == 1:`) and `AT END OF DATA` (`if loop_counter > 0:`).
+
+#### 2. Program Invocation & Lifecycle Control
+
+* **Inter-Module `CALLNAT` Compilation:** Restored the `CallProgramOp` pipeline from AST lowering to codegen. Calls emit imports (`from subprog import execute_subprog`) and invoke child subprograms with the shared context.
+* **Program Termination:** Added `STOP` and `TERMINATE` statement handling, lowering directly to `sys.exit(0)`.
+* **Post-Test Loop Semantics:** Corrected `REPEAT ... UNTIL` lowering. The compiler now detects bottom-placed `UNTIL` clauses (`UNTIL_POST`) and emits `while True:` blocks with terminal `if <cond>: break` checks rather than pre-test `while not (<cond>):` loops.
+
+#### 3. Data Representation, Arrays & Formatting
+
+* **Multi-Dimensional & Array Indexing:** Added support for 1-based array subscripts (`array_indices` and `target_indices`), converting 1-based Natural indices (`LANG(1.1)`) to 0-based Python subscripts (`record.lang[(1 - 1)][(1 - 1)]`).
+* **Numeric & Currency Edit Masks:** Extended `MOVE EDITED` in `PythonEmitter` to parse numeric format strings (e.g., `(EM=ZZZ,ZZ9.99-)`), generating formatted string interpolation with thousands commas, decimal quantization, and trailing negative signs.
+* **Dynamic Arrays:** Updated `data_parser.py` and AST lowering to accept `(A) DYNAMIC` variables, and added `RESIZE ARRAY` lowering to `[None] * int(size)`.
+* **Delimited Strings:** Fixed default `COMPRESS` behavior to join with a single space delimiter (`' '`) rather than an empty string when no delimiter clause is specified.
+
+#### 4. Test Harness & Build Architecture
+
+* **Multi-File Workspace Fixtures:** Overhauled `tests/test_fixtures.py` to support multi-module workspaces within individual `.test` files using tagged headers (`=== NATURAL: <file> ===`, `=== PYTHON: <file> ===`). Each test dynamically builds in a temporary directory via `ProjectBuilder`.
+* **Topological DAG Build Graph:** Prevented false cyclic dependencies in `ProjectBuilder` by filtering out internal inline scopes (`INLINE_LOCAL`, `INLINE_PARAMETER`, `INLINE_GLOBAL`).
+* **Chained Mock Database Engine:** Implemented `MockQuery` (supporting chained `.filter()` and `.limit()` calls) and extended `MockSession` (`commit`, `rollback`, `refresh`) so compiled SQLAlchemy queries run in-memory without database dependencies.
+
+---
+
+### Component-by-Component Diff Summary
+
+| File / Component | Primary Changes |
+| --- | --- |
+| `src/natural/grammar/pass1_island.lark` | Added `at_start_block` and `at_end_block`; updated `raw_statement` lookahead boundaries. |
+| `src/natural/ir/pass1_models.py` | Added `AtStartBlock`, `AtEndBlock`, and `is_post_test` flag on `RepeatBlock`. |
+| `src/natural/ir/models.py` | Added AST statement models (`EndTransaction`, `BackoutTransaction`, `GetSame`, `Stop`, `Terminate`, `AtStartOfData`, `AtEndOfData`, `ResizeArray`); added `criteria` to `FindStatement` and `array_indices` to `Expression`. |
+| `src/natural/ir/semantic.py` | Added semantic IR1 operations (`TransactionOp`, `EntityRefreshOp`, `TerminateOp`, `AtStartOfDataOp`, `AtEndOfDataOp`, `ResizeArrayOp`, `CallProgramOp`); added `target_indices` to `AssignOp`. |
+| `src/natural/ir/__init__.py` | Exported all new AST statements and Pass 1 models. |
+| `src/natural/normalizer/pass1_parser.py` | Transformed start/end blocks; detected bottom-placed `UNTIL` clauses for post-test loops. |
+| `src/natural/normalizer/pass2_dispatcher.py` | Routed lifecycle, transaction, array resizing, and loop control blocks to their statement parsers. |
+| `src/natural/normalizer/parsers/find_parser.py` | Refactored `FIND` parsing to delegate complex `WITH` search criteria to `ExpressionParser`. |
+| `src/natural/normalizer/parsers/database_parser.py` | Parsed `GET SAME`, `END TRANSACTION`, and `BACKOUT TRANSACTION`. |
+| `src/natural/normalizer/parsers/data_parser.py` | Added support for `DYNAMIC` memory allocation in field format parsing. |
+| `src/natural/normalizer/lowering.py` | Lowered all newly introduced statements into IR1 semantic operations; handled array subscripts and range predicates. |
+| `src/natural/codegen/python_emitter.py` | Implemented codegen for transactions, program calls, array subscripts, post-test loops, and numeric edit masks. Fixed `datetime` import leakage. |
+| `src/natural/orchestrator/builder.py` | Filtered out inline scopes from workspace dependency graph generation. |
+| `build/build/python/target_orm.py` | Added fallback dynamic declarative base with generic `__getattr__` column fallbacks. |
+| `tests/test_fixtures.py` | Overhauled fixture runner for multi-file `.test` workspaces and chained `MockQuery` execution. |
+| `tests/fixtures/*.test` | Added `find_compound.test`, `callnat_multi.test`, `transaction.test`, `numeric_edit_mask.test`; updated `repeat_loop.test`. |

@@ -22,6 +22,13 @@ from natural.ir.semantic import (
     MoveAllOp,
     ResetOp,
     CallSubroutineOp,
+    CallProgramOp,
+    TransactionOp,
+    EntityRefreshOp,
+    TerminateOp,
+    AtStartOfDataOp,
+    AtEndOfDataOp,
+    ResizeArrayOp,
     EntityUpdateOp,
     EntityStoreOp,
     EntityDeleteOp,
@@ -72,6 +79,10 @@ class PythonEmitter:
     def emit_expr(self, expr: SemanticExpression, model_class: Optional[str] = None) -> str:
         if expr.op in ("ref", "entity_field"):
             base_ref = self._resolve_ref(expr.symbol_id, model_class=model_class)
+            if getattr(expr, "array_indices", None):
+                for idx in expr.array_indices:
+                    idx_val = self.emit_expr(idx, model_class=model_class)
+                    base_ref = f"{base_ref}[({idx_val} - 1)]"
             if expr.substring:
                 start_val = self.emit_expr(expr.substring.start, model_class=model_class)
                 if expr.substring.length:
@@ -113,6 +124,11 @@ class PythonEmitter:
     def emit_operation(self, op):
         if isinstance(op, AssignOp):
             target = self._resolve_ref(op.target_id)
+            if getattr(op, "target_indices", None):
+                for idx in op.target_indices:
+                    idx_val = self.emit_expr(idx)
+                    target = f"{target}[({idx_val} - 1)]"
+
             target_sym = self._sym_by_id.get(op.target_id)
             source_sym = self._sym_by_id.get(op.expr.symbol_id) if op.expr.symbol_id else None
 
@@ -129,12 +145,32 @@ class PythonEmitter:
                 return
 
             if op.edit_mask and target_sym and source_sym:
-                py_mask = self._convert_edit_mask(op.edit_mask)
                 if target_sym.semantic_type.base == "string" and source_sym.semantic_type.base == "date":
+                    py_mask = self._convert_edit_mask(op.edit_mask)
                     self.emit_line(f"{target} = {self._resolve_ref(op.expr.symbol_id)}.strftime('{py_mask}')")
                     return
                 elif target_sym.semantic_type.base == "date" and source_sym.semantic_type.base == "string":
+                    py_mask = self._convert_edit_mask(op.edit_mask)
                     self.emit_line(f"{target} = datetime.strptime({self._resolve_ref(op.expr.symbol_id)}, '{py_mask}').date()")
+                    return
+                elif target_sym.semantic_type.base == "string" and source_sym.semantic_type.base in ("decimal", "integer", "numeric"):
+                    mask = op.edit_mask.upper()
+                    decimals = 0
+                    if "." in mask:
+                        dec_part = mask.split(".", 1)[1].rstrip("-+CRDB")
+                        decimals = len(dec_part)
+                    use_comma = "," in mask
+                    has_trailing_minus = mask.endswith("-")
+                    fmt_spec = f",.{decimals}f" if use_comma else f".{decimals}f"
+                    src_ref = self._resolve_ref(op.expr.symbol_id)
+                    if has_trailing_minus:
+                        self.emit_line(f"{target} = f\"{{abs({src_ref}):{fmt_spec}}}{{'-' if {src_ref} < 0 else ''}}\"")
+                    else:
+                        self.emit_line(f"{target} = f\"{{{src_ref}:{fmt_spec}}}\"")
+                    return
+                elif target_sym.semantic_type.base in ("decimal", "numeric") and source_sym.semantic_type.base == "string":
+                    src_ref = self._resolve_ref(op.expr.symbol_id)
+                    self.emit_line(f"{target} = Decimal({src_ref}.replace(',', '').replace(' ', '').replace('+', '').replace('-', ''))")
                     return
 
             expr = self.emit_expr(op.expr)
@@ -145,7 +181,6 @@ class PythonEmitter:
             elif op.rounded and target_sym and target_sym.semantic_type.base == "integer":
                 self.emit_line(f"{target} = int(round({expr}))")
             elif target_sym and target_sym.semantic_type.base == "integer":
-                # Ensure integer division or integer conversion for I/B types
                 if op.expr.op == "divide":
                     self.emit_line(f"{target} = int({expr})")
                 else:
@@ -162,7 +197,7 @@ class PythonEmitter:
 
         elif isinstance(op, CompressOp):
             target = self._resolve_ref(op.target_id)
-            sep = f"{self.emit_expr(op.delimiter)}" if op.delimiter else "''"
+            sep = f"{self.emit_expr(op.delimiter)}" if op.delimiter else "' '"
             items_str = ", ".join(f"str({self.emit_expr(e)})" for e in op.operands)
             self.emit_line(f"{target} = {sep}.join([{items_str}])")
 
@@ -206,6 +241,45 @@ class PythonEmitter:
         elif isinstance(op, CallSubroutineOp):
             clean_sub = self._clean_name(op.subroutine_name)
             self.emit_line(f"sub_{clean_sub}(ctx, session)")
+
+        elif isinstance(op, CallProgramOp):
+            clean_prog = self._clean_name(op.program_name)
+            self.emit_line(f"execute_{clean_prog}(ctx, session)")
+
+        elif isinstance(op, TransactionOp):
+            if op.action == "commit":
+                self.emit_line("session.commit()")
+            else:
+                self.emit_line("session.rollback()")
+
+        elif isinstance(op, EntityRefreshOp):
+            self.emit_line("session.refresh(record)")
+
+        elif isinstance(op, TerminateOp):
+            self.emit_line("sys.exit(0)")
+
+        elif isinstance(op, AtStartOfDataOp):
+            self.emit_line("if loop_idx == 1:")
+            self.indent_level += 1
+            if not op.body:
+                self.emit_line("pass")
+            for sub_op in op.body:
+                self.emit_operation(sub_op)
+            self.indent_level -= 1
+
+        elif isinstance(op, AtEndOfDataOp):
+            self.emit_line("if loop_counter > 0:")
+            self.indent_level += 1
+            if not op.body:
+                self.emit_line("pass")
+            for sub_op in op.body:
+                self.emit_operation(sub_op)
+            self.indent_level -= 1
+
+        elif isinstance(op, ResizeArrayOp):
+            target = self._resolve_ref(op.target_id)
+            size = self.emit_expr(op.size)
+            self.emit_line(f"{target} = [None] * int({size})")
 
         elif isinstance(op, EntityUpdateOp):
             self.emit_line("session.flush()  # UPDATE committed for active loop")
@@ -267,21 +341,36 @@ class PythonEmitter:
                 self.indent_level -= 1
 
         elif isinstance(op, LoopOp):
-            if op.loop_type == "until" and op.condition:
+            if op.loop_type in ("until", "until_post") and op.condition:
                 cond = self.emit_expr(op.condition)
-                self.emit_line(f"while not ({cond}):")
+                self.emit_line("while True:")
+                self.indent_level += 1
+                if not op.body:
+                    self.emit_line("pass")
+                for sub_op in op.body:
+                    self.emit_operation(sub_op)
+                self.emit_line(f"if {cond}:")
+                self.indent_level += 1
+                self.emit_line("break")
+                self.indent_level -= 1
+                self.indent_level -= 1
             elif op.loop_type == "while" and op.condition:
                 cond = self.emit_expr(op.condition)
                 self.emit_line(f"while {cond}:")
+                self.indent_level += 1
+                if not op.body:
+                    self.emit_line("pass")
+                for sub_op in op.body:
+                    self.emit_operation(sub_op)
+                self.indent_level -= 1
             else:
                 self.emit_line("while True:")
-
-            self.indent_level += 1
-            if not op.body:
-                self.emit_line("pass")
-            for sub_op in op.body:
-                self.emit_operation(sub_op)
-            self.indent_level -= 1
+                self.indent_level += 1
+                if not op.body:
+                    self.emit_line("pass")
+                for sub_op in op.body:
+                    self.emit_operation(sub_op)
+                self.indent_level -= 1
 
         elif isinstance(op, ForLoopOp):
             var_target = self._resolve_ref(op.variable_id)
@@ -387,10 +476,11 @@ class PythonEmitter:
         self.indent_level -= 1
         self.emit_line("def add(self, obj): pass")
         self.emit_line("def delete(self, obj): pass")
-        self.emit_line("def flush(self):")
-        self.indent_level += 1
-        self.emit_line("pass")
-        self.indent_level -= 2
+        self.emit_line("def flush(self): pass")
+        self.emit_line("def commit(self): pass")
+        self.emit_line("def rollback(self): pass")
+        self.emit_line("def refresh(self, obj): pass")
+        self.indent_level -= 1
         self.emit_line("")
         self.emit_line("session = MockSession()")
         self.emit_line(f"result = {func_name}(ctx, session)")
@@ -412,6 +502,7 @@ class PythonEmitter:
 
     def _collect_required_imports(self, emit_main: bool = False) -> List[str]:
         needs_os = False
+        needs_sys = False
         needs_decimal = False
         needs_round_half_up = False
         needs_date = False
@@ -444,10 +535,12 @@ class PythonEmitter:
                 scan_expr(item)
 
         def scan_ops(ops):
-            nonlocal needs_os, needs_decimal, needs_round_half_up, needs_date, needs_datetime
+            nonlocal needs_os, needs_sys, needs_decimal, needs_round_half_up, needs_date, needs_datetime
             for op in ops:
                 if isinstance(op, ReadWorkFileOp):
                     needs_os = True
+                if isinstance(op, TerminateOp):
+                    needs_sys = True
                 if isinstance(op, AssignOp):
                     if op.rounded:
                         target_sym = self._sym_by_id.get(op.target_id)
@@ -455,7 +548,10 @@ class PythonEmitter:
                             needs_decimal = True
                             needs_round_half_up = True
                     if op.edit_mask:
-                        needs_datetime = True
+                        target_sym = self._sym_by_id.get(op.target_id)
+                        source_sym = self._sym_by_id.get(op.expr.symbol_id) if op.expr.symbol_id else None
+                        if (target_sym and target_sym.semantic_type.base == "date") or (source_sym and source_sym.semantic_type.base == "date"):
+                            needs_datetime = True
                 if hasattr(op, "expr"):
                     scan_expr(op.expr)
                 if hasattr(op, "condition"):
@@ -481,6 +577,8 @@ class PythonEmitter:
                     needs_date = True
 
         import_lines = []
+        if needs_sys:
+            import_lines.append("import sys")
         if needs_os:
             import_lines.append("import os")
         if needs_decimal:
@@ -507,6 +605,16 @@ class PythonEmitter:
         for imp in import_lines:
             self.emit_line(imp)
 
+        callnat_imports = set()
+        for op in self.module.operations:
+            if isinstance(op, CallProgramOp):
+                prog = self._clean_name(op.program_name)
+                if prog != self._clean_name(self.module.module_id):
+                    callnat_imports.add(prog)
+
+        for prog in sorted(callnat_imports):
+            self.emit_line(f"from {prog} import execute_{prog}")
+
         orm_models = set()
         for op in self.module.operations:
             if isinstance(op, (QueryIterationOp, EntityStoreOp)):
@@ -515,7 +623,7 @@ class PythonEmitter:
         if orm_models:
             self.emit_line(f"from target_orm import {', '.join(sorted(orm_models))}")
 
-        if import_lines or orm_models:
+        if import_lines or callnat_imports or orm_models:
             self.emit_line("")
 
         class_name = self._to_pascal_case(self.module.module_id) + "Context"
@@ -593,7 +701,6 @@ class PythonEmitter:
         self.emit_line(f"def {func_name}(ctx: {class_name}, session):")
         self.indent_level += 1
 
-        # Check if module contains an OnErrorOp
         on_error_op = next((op for op in self.module.operations if isinstance(op, OnErrorOp)), None)
         other_ops = [op for op in self.module.operations if not isinstance(op, OnErrorOp)]
 

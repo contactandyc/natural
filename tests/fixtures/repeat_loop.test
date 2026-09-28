@@ -16,9 +16,11 @@ class RepeatLoopContext:
         self.steps = 0
 
 def execute_repeat_loop(ctx: RepeatLoopContext, session):
-    while not ((ctx.num >= 50)):
+    while True:
         ctx.steps = (ctx.steps + 1)
         ctx.num = (ctx.num * 2)
+        if (ctx.num >= 50):
+            break
     return ctx
 
 === EXECUTE ===

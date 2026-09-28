@@ -21,6 +21,8 @@ from natural.ir.pass1_models import (
     NoneBranchBlock,
     SubroutineBlock,
     OnErrorBlock,
+    AtStartBlock,
+    AtEndBlock,
 )
 
 
@@ -43,7 +45,20 @@ class IslandTransformer(Transformer):
         if not filtered:
             return None, "", []
 
-        non_body_types = (Pass1Module, RawStatement, FindBlock, ReadBlock, RepeatBlock, ForBlock, IfBlock, DecideBlock, ReadWorkBlock, OnErrorBlock)
+        non_body_types = (
+            Pass1Module,
+            RawStatement,
+            FindBlock,
+            ReadBlock,
+            RepeatBlock,
+            ForBlock,
+            IfBlock,
+            DecideBlock,
+            ReadWorkBlock,
+            OnErrorBlock,
+            AtStartBlock,
+            AtEndBlock,
+        )
         if len(filtered) > 1 and isinstance(filtered[0], str) and not isinstance(filtered[1], non_body_types):
             label = str(filtered[0])
             clause = str(filtered[1])
@@ -71,6 +86,14 @@ class IslandTransformer(Transformer):
         body = [c for c in children if c is not None]
         return OnErrorBlock(body=body)
 
+    def at_start_block(self, children) -> AtStartBlock:
+        body = [c for c in children if c is not None]
+        return AtStartBlock(body=body)
+
+    def at_end_block(self, children) -> AtEndBlock:
+        body = [c for c in children if c is not None]
+        return AtEndBlock(body=body)
+
     def if_block(self, children) -> IfBlock:
         filtered = [c for c in children if c is not None]
         clause = str(filtered[0])
@@ -91,17 +114,32 @@ class IslandTransformer(Transformer):
         label = None
         clause = ""
         body = []
+        is_bottom = False
 
-        non_body_types = (RawStatement, FindBlock, ReadBlock, RepeatBlock, ForBlock, IfBlock, DecideBlock, ReadWorkBlock, OnErrorBlock)
-        for item in filtered:
+        non_body_types = (
+            RawStatement,
+            FindBlock,
+            ReadBlock,
+            RepeatBlock,
+            ForBlock,
+            IfBlock,
+            DecideBlock,
+            ReadWorkBlock,
+            OnErrorBlock,
+            AtStartBlock,
+            AtEndBlock,
+        )
+        for idx, item in enumerate(filtered):
             if isinstance(item, str) and not isinstance(item, non_body_types):
                 cleaned = item.strip()
                 if cleaned:
+                    if idx > 0 and len(body) > 0:
+                        is_bottom = True
                     clause = f"UNTIL {cleaned}" if not cleaned.upper().startswith(("UNTIL", "WHILE")) else cleaned
             else:
                 body.append(item)
 
-        return RepeatBlock(label=label, raw_clause=clause, body=body)
+        return RepeatBlock(label=label, raw_clause=clause, body=body, is_post_test=is_bottom)
 
     def for_block(self, children) -> ForBlock:
         label, clause, body = self._extract_label_and_clause(children)

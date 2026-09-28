@@ -91,7 +91,8 @@ class ProjectBuilder:
                     pass1_ast = self.parser.parse_file(file_path)
                     ir0 = self.dispatcher.lower_module(pass1_ast)
                     for area in ir0.data_areas:
-                        self.dependency_graph[module_name].add(area.name.upper())
+                        if area.name.upper() not in ("INLINE_LOCAL", "INLINE_PARAMETER", "INLINE_GLOBAL"):
+                            self.dependency_graph[module_name].add(area.name.upper())
                     for stmt in ir0.body:
                         stmt_type = getattr(stmt, "statement_type", "")
                         if stmt_type in ("FIND", "READ"):

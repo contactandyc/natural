@@ -19,13 +19,20 @@ from natural.ir.pass1_models import (
     SubroutineBlock,
     ReadWorkBlock,
     OnErrorBlock,
+    AtStartBlock,
+    AtEndBlock,
 )
 from natural.ir.models import (
     NaturalModule,
     PerformStatement,
     OnErrorBlockStatement,
+    AtStartOfDataStatement,
+    AtEndOfDataStatement,
+    StopStatement,
+    TerminateStatement,
+    ResizeArrayStatement,
+    Expression,
     Statement,
-    DataAreaRef,
 )
 from natural.normalizer.parsers.find_parser import FindParser
 from natural.normalizer.parsers.data_parser import DataBlockParser
@@ -65,7 +72,6 @@ class Pass2Dispatcher:
         self.work_parser = WorkFileParser()
 
     def _dispatch_children(self, children_nodes: List[Any]) -> List[Statement]:
-        """Dispatches child AST nodes and flattens statement sequences."""
         statements: List[Statement] = []
         for child in children_nodes:
             if child is None:
@@ -137,6 +143,12 @@ class Pass2Dispatcher:
         if isinstance(node, OnErrorBlock):
             return OnErrorBlockStatement(body=self._dispatch_children(node.body))
 
+        if isinstance(node, AtStartBlock):
+            return AtStartOfDataStatement(body=self._dispatch_children(node.body))
+
+        if isinstance(node, AtEndBlock):
+            return AtEndOfDataStatement(body=self._dispatch_children(node.body))
+
         if isinstance(node, DecideBlock):
             decide_stmt = self.decide_parser.parse(node.raw_clause, decide_type=node.decide_type)
             for branch_node in node.branches:
@@ -156,11 +168,28 @@ class Pass2Dispatcher:
         text = raw_text.strip()
         upper = text.upper()
 
+        if upper == "STOP" or upper.startswith("STOP "):
+            return StopStatement()
+
+        if upper == "TERMINATE" or upper.startswith("TERMINATE "):
+            return TerminateStatement()
+
+        if upper.startswith(("RESIZE ARRAY", "EXPAND ARRAY", "REDUCE ARRAY")):
+            parts = text.split()
+            arr_name = parts[2]
+            m = re.search(r"TO\s*\((.*?)\)", text, re.IGNORECASE)
+            if m:
+                expr_str = m.group(1).split(":")[-1].strip()
+                size_expr = self.assign_parser.expr_parser.parse(expr_str)
+            else:
+                size_expr = Expression(kind="literal", value=0)
+            return ResizeArrayStatement(action=parts[0].upper(), array_name=arr_name, dimensions=[size_expr])
+
         if upper.startswith("PERFORM "):
             sub_name = text.split()[1].strip().upper()
             return PerformStatement(subroutine_name=sub_name)
 
-        if upper.startswith(("UPDATE", "DELETE", "STORE", "GET ")):
+        if upper.startswith(("UPDATE", "DELETE", "STORE", "GET ", "END TRANSACTION", "BACKOUT TRANSACTION")):
             try:
                 return self.db_parser.parse(text)
             except ValueError:
@@ -202,9 +231,9 @@ class Pass2Dispatcher:
         if upper.startswith(("ASSIGN ", "COMPUTE ")) or ":=" in upper or (
                 "=" in upper
                 and not upper.startswith(("IF ", "FIND ", "READ ", "WRITE ", "PRINT "))
-                and not "<=" in upper
-                and not ">=" in upper
-                and not "==" in upper
+                and "<=" not in upper
+                and ">=" not in upper
+                and "==" not in upper
         ):
             try:
                 return self.assign_parser.parse(text)
