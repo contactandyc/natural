@@ -1,0 +1,37 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #NUM   (I4)
+1 #STEPS (I4)
+END-DEFINE
+REPEAT
+    ADD 1 TO #STEPS
+    MULTIPLY #NUM BY 2
+UNTIL #NUM >= 50
+END-REPEAT
+
+=== PYTHON ===
+class RepeatLoopContext:
+    def __init__(self):
+        self.num = 0
+        self.steps = 0
+
+def execute_repeat_loop(ctx: RepeatLoopContext, session):
+    while not ((ctx.num >= 50)):
+        ctx.steps = (ctx.steps + 1)
+        ctx.num = (ctx.num * 2)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    num: 10
+    steps: 0
+  expected:
+    num: 80
+    steps: 3
+
+- input:
+    num: 25
+    steps: 0
+  expected:
+    num: 50
+    steps: 1

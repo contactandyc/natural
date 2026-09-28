@@ -1,0 +1,45 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #CODE   (A2)
+1 #STATUS (A15)
+END-DEFINE
+DECIDE ON FIRST VALUE OF #CODE
+    VALUE 'AP'
+        #STATUS := 'APPROVED'
+    VALUE 'RJ'
+        #STATUS := 'REJECTED'
+    NONE VALUE
+        #STATUS := 'UNKNOWN'
+END-DECIDE
+
+=== PYTHON ===
+class DecideOnContext:
+    def __init__(self):
+        self.code = ""
+        self.status = ""
+
+def execute_decide_on(ctx: DecideOnContext, session):
+    if (ctx.code == 'AP'):
+        ctx.status = 'APPROVED'
+    else:
+        if (ctx.code == 'RJ'):
+            ctx.status = 'REJECTED'
+        else:
+            ctx.status = 'UNKNOWN'
+    return ctx
+
+=== EXECUTE ===
+- input:
+    code: "AP"
+  expected:
+    status: "APPROVED"
+
+- input:
+    code: "RJ"
+  expected:
+    status: "REJECTED"
+
+- input:
+    code: "XX"
+  expected:
+    status: "UNKNOWN"

@@ -25,8 +25,8 @@ class DataField(BaseModel):
     level: int = 1
     name: str
     format: Optional[FieldFormat] = None
-    direction: Optional[str] = None  # IN, OUT, IN_OUT
-    parent_name: Optional[str] = None  # Target variable if this field is part of a REDEFINE
+    direction: Optional[str] = None
+    parent_name: Optional[str] = None
     array_dim: Optional[str] = None
     init_val: Optional[Any] = None
 
@@ -61,7 +61,7 @@ class DataAreaRef(BaseModel):
 
 
 class Expression(BaseModel):
-    kind: str  # literal, ref, binary_op
+    kind: str  # literal, ref, binary_op, sys_var
     value: Optional[Any] = None
     operator: Optional[str] = None
     left: Optional["Expression"] = None
@@ -102,13 +102,15 @@ class DecideBranch(BaseModel):
 
 class DecideStatement(Statement):
     statement_type: str = "DECIDE"
-    operand: Expression
+    decide_type: str = "ON"  # ON or FOR
+    operand: Optional[Expression] = None
     branches: List[DecideBranch] = Field(default_factory=list)
     none_branch: List[SerializeAsAny[Statement]] = Field(default_factory=list)
 
 
 class FindStatement(Statement):
     statement_type: str = "FIND"
+    label: Optional[str] = None
     view_name: str
     descriptor: str
     operand: Expression
@@ -119,6 +121,7 @@ class FindStatement(Statement):
 
 class ReadStatement(Statement):
     statement_type: str = "READ"
+    label: Optional[str] = None
     view_name: str
     descriptor: Optional[str] = None
     by_descriptor: Optional[str] = None
@@ -133,10 +136,26 @@ class CallnatStatement(Statement):
     parameters: List[Expression] = Field(default_factory=list)
 
 
+class PerformStatement(Statement):
+    statement_type: str = "PERFORM"
+    subroutine_name: str
+
+
 class LoopStatement(Statement):
     statement_type: str = "REPEAT"
-    loop_type: str = "INFINITE"  # "WHILE", "UNTIL", "INFINITE"
+    label: Optional[str] = None
+    loop_type: str = "INFINITE"  # WHILE, UNTIL, INFINITE
     condition: Optional[Expression] = None
+    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+
+
+class ForStatement(Statement):
+    statement_type: str = "FOR"
+    label: Optional[str] = None
+    variable: str
+    start_expr: Expression
+    end_expr: Expression
+    step_expr: Optional[Expression] = None
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
 
 
@@ -145,6 +164,28 @@ class MoveStatement(Statement):
     source: Expression
     target: Expression
     edit_mask: Optional[str] = None
+
+
+class CompressStatement(Statement):
+    statement_type: str = "COMPRESS"
+    operands: List[Expression] = Field(default_factory=list)
+    target: Expression
+    delimiter: Optional[Expression] = None
+    with_delimiters: bool = False
+
+
+class ExamineStatement(Statement):
+    statement_type: str = "EXAMINE"
+    target: Expression
+    pattern: Expression
+    replace_with: Optional[Expression] = None
+    giving_number: Optional[Expression] = None
+
+
+class ResetStatement(Statement):
+    statement_type: str = "RESET"
+    targets: List[Expression] = Field(default_factory=list)
+    initial: bool = False
 
 
 class InputModifier(BaseModel):
@@ -170,12 +211,47 @@ class WriteStatement(Statement):
 
 class UpdateStatement(Statement):
     statement_type: str = "UPDATE"
+    loop_label: Optional[str] = None
+
+
+class DeleteStatement(Statement):
+    statement_type: str = "DELETE"
+    loop_label: Optional[str] = None
+
+
+class StoreStatement(Statement):
+    statement_type: str = "STORE"
+    view_name: str
 
 
 class GetStatement(Statement):
     statement_type: str = "GET"
     view_name: str
     arguments: List[Expression] = Field(default_factory=list)
+
+
+class ReadWorkFileStatement(Statement):
+    statement_type: str = "READ_WORK_FILE"
+    label: Optional[str] = None
+    file_number: int
+    fields: List[Expression] = Field(default_factory=list)
+    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+
+
+class WriteWorkFileStatement(Statement):
+    statement_type: str = "WRITE_WORK_FILE"
+    file_number: int
+    fields: List[Expression] = Field(default_factory=list)
+
+
+class CloseWorkFileStatement(Statement):
+    statement_type: str = "CLOSE_WORK_FILE"
+    file_number: int
+
+
+class SubroutineDefinition(BaseModel):
+    name: str
+    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
 
 
 class NaturalModule(BaseModel):

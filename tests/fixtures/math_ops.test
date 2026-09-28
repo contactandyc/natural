@@ -1,0 +1,41 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #SUBTOTAL (P7.2)
+1 #TAX_RATE (P3.2)
+1 #TAX      (P7.2)
+1 #TOTAL    (P7.2)
+END-DEFINE
+#TAX := #SUBTOTAL * #TAX_RATE
+#TOTAL := #SUBTOTAL + #TAX
+SUBTRACT 5.00 FROM #TOTAL
+
+=== PYTHON ===
+from decimal import Decimal
+
+class MathOpsContext:
+    def __init__(self):
+        self.subtotal = Decimal('0')
+        self.tax_rate = Decimal('0')
+        self.tax = Decimal('0')
+        self.total = Decimal('0')
+
+def execute_math_ops(ctx: MathOpsContext, session):
+    ctx.tax = (ctx.subtotal * ctx.tax_rate)
+    ctx.total = (ctx.subtotal + ctx.tax)
+    ctx.total = (ctx.total - Decimal('5.00'))
+    return ctx
+
+=== EXECUTE ===
+- input:
+    subtotal: "100.00"
+    tax_rate: "0.08"
+  expected:
+    tax: "8.0000"
+    total: "103.0000"
+
+- input:
+    subtotal: "50.00"
+    tax_rate: "0.10"
+  expected:
+    tax: "5.0000"
+    total: "50.0000"

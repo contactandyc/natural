@@ -121,7 +121,6 @@ operations:
       op: ref
       symbol_id: sym.parameter.ship-class
   cardinality: many
-  on_empty: []
   body:
   - op: assign
     target_id: sym.local.base-charge
@@ -150,4 +149,3 @@ operations:
         symbol_id: sym.entity.tariff-view.heavy-surcharge
     - op: break
       target_loop_id: loop.find_001
-    else_branch: []

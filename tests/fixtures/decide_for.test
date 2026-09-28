@@ -1,0 +1,45 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #SCORE (I4)
+1 #TIER  (A10)
+END-DEFINE
+DECIDE FOR FIRST CONDITION
+    WHEN #SCORE >= 90
+        #TIER := 'GOLD'
+    WHEN #SCORE >= 70
+        #TIER := 'SILVER'
+    NONE
+        #TIER := 'BRONZE'
+END-DECIDE
+
+=== PYTHON ===
+class DecideForContext:
+    def __init__(self):
+        self.score = 0
+        self.tier = ""
+
+def execute_decide_for(ctx: DecideForContext, session):
+    if (ctx.score >= 90):
+        ctx.tier = 'GOLD'
+    else:
+        if (ctx.score >= 70):
+            ctx.tier = 'SILVER'
+        else:
+            ctx.tier = 'BRONZE'
+    return ctx
+
+=== EXECUTE ===
+- input:
+    score: 95
+  expected:
+    tier: "GOLD"
+
+- input:
+    score: 75
+  expected:
+    tier: "SILVER"
+
+- input:
+    score: 50
+  expected:
+    tier: "BRONZE"

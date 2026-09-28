@@ -20,7 +20,7 @@ done
 # --- Extract Command and Arguments ---
 COMMAND="${1:-build}"
 if [ $# -gt 0 ]; then
-    shift # Shift off the command so remaining args ($@) can be passed to subcommands
+    shift
 fi
 
 PYTHON_VER="${PYTHON_VERSION:-3.11}"
@@ -50,31 +50,49 @@ case "$COMMAND" in
         "$0" install
     fi
     source venv/bin/activate
-
-    # Execute the module directly, passing through any extra CLI flags
     python3 -m natural "$@"
     ;;
 
-  test)
-    echo "--- Running Tests ---"
+  test|bless)
     if [ ! -d "venv" ]; then
         "$0" install
     fi
     source venv/bin/activate
 
-    if command -v pytest &> /dev/null; then
-        pytest "$@"
-    else
-        python3 -m unittest discover -s tests
+    pytest_args=()
+    if [ "$COMMAND" = "bless" ]; then
+        pytest_args+=("--bless")
     fi
+
+    filter_terms=()
+    for arg in "$@"; do
+        if [ "$arg" = "-v" ] || [ "$arg" = "--verbose" ]; then
+            pytest_args+=("-s" "--verbose-test")
+        elif [[ "$arg" == -* ]]; then
+            pytest_args+=("$arg")
+        elif [[ "$arg" == *.test ]]; then
+            filter_terms+=("$(basename "$arg" .test)")
+        elif [[ -f "$arg" ]]; then
+            pytest_args+=("$arg")
+        else
+            filter_terms+=("$arg")
+        fi
+    done
+
+    if [ ${#filter_terms[@]} -gt 0 ]; then
+        combined_expr=$(printf " or %s" "${filter_terms[@]}")
+        combined_expr="${combined_expr:4}"
+        pytest_args+=("-k" "$combined_expr")
+    fi
+
+    echo "--- Running Pytest ${pytest_args[*]:-} ---"
+    pytest "${pytest_args[@]:-}"
     ;;
 
   clean)
     echo "--- Cleaning Workspace and Environments ---"
-    # Remove virtualenv and python packaging metadata
     rm -rf venv .pytest_cache *.egg-info build dist
 
-    # Remove global symlink if pointing here
     if [ -L "$HOME/.local/bin/natural" ]; then
         current_target="$(readlink "$HOME/.local/bin/natural" || true)"
         if [[ "$current_target" == *"$PWD"* ]]; then
@@ -83,15 +101,13 @@ case "$COMMAND" in
         fi
     fi
 
-    # Clean compiled python bytecode
     find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
     find . -type f -name "*.pyc" -delete 2>/dev/null || true
-
     echo "✅ Clean complete."
     ;;
 
   *)
-    echo "Usage: ./build.sh [install|build|run|test|clean] [args...]" >&2
+    echo "Usage: ./build.sh [install|build|run|test|bless|clean] [args...]" >&2
     exit 1
     ;;
 esac

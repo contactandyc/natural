@@ -1,11 +1,7 @@
 name: RATECALC
-includes: []
 data_areas:
 - name: TARIFF-P
   scope: PARAMETER
-  inline_fields: []
-  views: []
-  redefines: []
 - name: INLINE_LOCAL
   scope: LOCAL
   inline_fields:
@@ -25,9 +21,6 @@ data_areas:
       length: 7
       digits: 7
       decimals: 2
-  views: []
-  redefines: []
-subroutines: {}
 body:
 - statement_type: FIND
   view_name: TARIFF-VIEW
@@ -65,5 +58,3 @@ body:
         value: HEAVY-SURCHARGE
     - statement_type: ESCAPE
       target: BOTTOM
-    else_branch: []
-  on_empty: []

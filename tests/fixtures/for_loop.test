@@ -1,0 +1,42 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #START (I4)
+1 #END   (I4)
+1 #TOTAL (I4)
+LOCAL
+1 #I     (I4)
+END-DEFINE
+FOR #I := #START TO #END STEP 2
+    ADD #I TO #TOTAL
+END-FOR
+
+=== PYTHON ===
+class ForLoopContext:
+    def __init__(self):
+        self.start = 0
+        self.end = 0
+        self.total = 0
+        self.i = 0
+
+def execute_for_loop(ctx: ForLoopContext, session):
+    for loop_val in range(int(ctx.start), int(ctx.end) + 1, int(2)):
+        ctx.i = loop_val
+        ctx.total = (ctx.total + ctx.i)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    start: 1
+    end: 5
+    total: 0
+  expected:
+    total: 9
+    i: 5
+
+- input:
+    start: 2
+    end: 8
+    total: 10
+  expected:
+    total: 30
+    i: 8

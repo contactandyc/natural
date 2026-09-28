@@ -1,0 +1,67 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #DATE-STR (A8)
+1 REDEFINE #DATE-STR
+  2 #YYYY (N4)
+  2 #MM   (N2)
+  2 #DD   (N2)
+1 #YEAR-OUT (I4)
+END-DEFINE
+#YEAR-OUT := #YYYY
+#MM := 12
+
+=== PYTHON ===
+from decimal import Decimal
+
+class RedefineContext:
+    def __init__(self):
+        self.date_str = ""
+        self.year_out = 0
+
+    @property
+    def yyyy(self) -> int:
+        sub = self.date_str[0:4]
+        return int(sub) if sub.isdigit() else 0
+
+    @yyyy.setter
+    def yyyy(self, val: int):
+        val_str = f'{int(val):04d}'
+        self.date_str = self.date_str[:0] + val_str + self.date_str[4:]
+
+    @property
+    def mm(self) -> int:
+        sub = self.date_str[4:6]
+        return int(sub) if sub.isdigit() else 0
+
+    @mm.setter
+    def mm(self, val: int):
+        val_str = f'{int(val):02d}'
+        self.date_str = self.date_str[:4] + val_str + self.date_str[6:]
+
+    @property
+    def dd(self) -> int:
+        sub = self.date_str[6:8]
+        return int(sub) if sub.isdigit() else 0
+
+    @dd.setter
+    def dd(self, val: int):
+        val_str = f'{int(val):02d}'
+        self.date_str = self.date_str[:6] + val_str + self.date_str[8:]
+
+def execute_redefine(ctx: RedefineContext, session):
+    ctx.year_out = ctx.yyyy
+    ctx.mm = 12
+    return ctx
+
+=== EXECUTE ===
+- input:
+    date_str: "20260415"
+  expected:
+    year_out: 2026
+    date_str: "20261215"
+
+- input:
+    date_str: "19990101"
+  expected:
+    year_out: 1999
+    date_str: "19991201"

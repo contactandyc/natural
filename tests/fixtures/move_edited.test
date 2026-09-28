@@ -1,0 +1,34 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #RAW_DATE (A8)
+1 #FORMATTED (A10)
+LOCAL
+1 #D (D)
+END-DEFINE
+MOVE EDITED #RAW_DATE TO #D (EM=YYYYMMDD)
+MOVE EDITED #D TO #FORMATTED (EM=YYYY-MM-DD)
+
+=== PYTHON ===
+from datetime import date, datetime
+
+class MoveEditedContext:
+    def __init__(self):
+        self.raw_date = ""
+        self.formatted = ""
+        self.d = date.today()
+
+def execute_move_edited(ctx: MoveEditedContext, session):
+    ctx.d = datetime.strptime(ctx.raw_date, '%Y%m%d').date()
+    ctx.formatted = ctx.d.strftime('%Y-%m-%d')
+    return ctx
+
+=== EXECUTE ===
+- input:
+    raw_date: "20260928"
+  expected:
+    formatted: "2026-09-28"
+
+- input:
+    raw_date: "20000101"
+  expected:
+    formatted: "2000-01-01"

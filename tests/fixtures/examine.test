@@ -1,0 +1,31 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #TEXT        (A30)
+1 #OCCURRENCES (I4)
+END-DEFINE
+EXAMINE #TEXT FOR ' ' GIVING NUMBER #OCCURRENCES
+EXAMINE #TEXT FOR '-' REPLACE WITH '/'
+
+=== PYTHON ===
+class ExamineContext:
+    def __init__(self):
+        self.text = ""
+        self.occurrences = 0
+
+def execute_examine(ctx: ExamineContext, session):
+    ctx.occurrences = ctx.text.count(str(' '))
+    ctx.text = ctx.text.replace(str('-'), str('/'))
+    return ctx
+
+=== EXECUTE ===
+- input:
+    text: "2026-09-28 date"
+  expected:
+    occurrences: 1
+    text: "2026/09/28 date"
+
+- input:
+    text: "A-B-C-D"
+  expected:
+    occurrences: 0
+    text: "A/B/C/D"

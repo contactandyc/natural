@@ -13,14 +13,20 @@ from natural.ir.pass1_models import (
     FindBlock,
     IfBlock,
     RepeatBlock,
+    ForBlock,
     ReadBlock,
+    ReadWorkBlock,
     DecideBlock,
     DecideBranchBlock,
     NoneBranchBlock,
+    SubroutineBlock,
 )
 
 
 class IslandTransformer(Transformer):
+    def label(self, tokens) -> str:
+        return str(tokens[0]).rstrip(".").strip()
+
     def raw_clause(self, tokens) -> str:
         return str(tokens[0]).strip()
 
@@ -28,54 +34,102 @@ class IslandTransformer(Transformer):
         return RawStatement(text=str(tokens[0]).strip())
 
     def define_data_block(self, tokens) -> DefineDataBlock:
-        # Since keywords are inlined/suppressed in grammar, tokens contains RAW_DATA_CONTENT if present
         content = str(tokens[0]).strip() if len(tokens) > 0 and tokens[0] is not None else ""
         return DefineDataBlock(raw_content=content)
 
+    def _extract_label_and_clause(self, children):
+        filtered = [c for c in children if c is not None]
+        if not filtered:
+            return None, "", []
+
+        non_body_types = (Pass1Module, RawStatement, FindBlock, ReadBlock, RepeatBlock, ForBlock, IfBlock, DecideBlock, ReadWorkBlock)
+        if len(filtered) > 1 and isinstance(filtered[0], str) and not isinstance(filtered[1], non_body_types):
+            label = str(filtered[0])
+            clause = str(filtered[1])
+            body = filtered[2:]
+        else:
+            label = None
+            clause = str(filtered[0])
+            body = filtered[1:]
+
+        return label, clause, body
+
     def find_block(self, children) -> FindBlock:
-        clause = children[0]
-        body = [c for c in children[1:] if c is not None]
-        return FindBlock(raw_clause=clause, body=body)
+        label, clause, body = self._extract_label_and_clause(children)
+        return FindBlock(label=label, raw_clause=clause, body=body)
+
+    def read_block(self, children) -> ReadBlock:
+        label, clause, body = self._extract_label_and_clause(children)
+        return ReadBlock(label=label, raw_clause=clause, body=body)
+
+    def read_work_block(self, children) -> ReadWorkBlock:
+        label, clause, body = self._extract_label_and_clause(children)
+        return ReadWorkBlock(label=label, raw_clause=clause, body=body)
 
     def if_block(self, children) -> IfBlock:
-        clause = children[0]
+        filtered = [c for c in children if c is not None]
+        clause = str(filtered[0])
         body = []
         else_body = []
         target = body
 
-        for c in children[1:]:
+        for c in filtered[1:]:
             if isinstance(c, Token) and c.type == "ELSE":
                 target = else_body
-            elif c is not None:
+            else:
                 target.append(c)
 
         return IfBlock(raw_clause=clause, body=body, else_body=else_body)
 
     def repeat_block(self, children) -> RepeatBlock:
-        clause = children[0]
-        body = [c for c in children[1:] if c is not None]
-        return RepeatBlock(raw_clause=clause, body=body)
+        filtered = [c for c in children if c is not None]
+        label = None
+        clause = ""
+        body = []
 
-    def read_block(self, children) -> ReadBlock:
-        clause = children[0]
-        body = [c for c in children[1:] if c is not None]
-        return ReadBlock(raw_clause=clause, body=body)
+        non_body_types = (RawStatement, FindBlock, ReadBlock, RepeatBlock, ForBlock, IfBlock, DecideBlock, ReadWorkBlock)
+        for item in filtered:
+            if isinstance(item, str) and not isinstance(item, non_body_types):
+                cleaned = item.strip()
+                if cleaned:
+                    clause = f"UNTIL {cleaned}" if not cleaned.upper().startswith(("UNTIL", "WHILE")) else cleaned
+            else:
+                body.append(item)
+
+        return RepeatBlock(label=label, raw_clause=clause, body=body)
+
+    def for_block(self, children) -> ForBlock:
+        label, clause, body = self._extract_label_and_clause(children)
+        return ForBlock(label=label, raw_clause=clause, body=body)
 
     def decide_branch(self, children) -> DecideBranchBlock:
-        clause = children[0]
-        body = [c for c in children[1:] if c is not None]
+        filtered = [c for c in children if c is not None]
+        clause = str(filtered[0])
+        body = filtered[1:]
         return DecideBranchBlock(raw_clause=clause, body=body)
 
     def none_branch(self, children) -> NoneBranchBlock:
-        # Filter out literal string/token artifacts and keep AST statements
         body = [c for c in children if c is not None and not isinstance(c, (Token, str))]
         return NoneBranchBlock(raw_clause="", body=body)
 
-    def decide_block(self, children) -> DecideBlock:
-        clause = children[0]
-        branches = [c for c in children[1:] if isinstance(c, DecideBranchBlock)]
-        none_branch = next((c for c in children[1:] if isinstance(c, NoneBranchBlock)), None)
-        return DecideBlock(raw_clause=clause, branches=branches, none_branch=none_branch)
+    def decide_on_block(self, children) -> DecideBlock:
+        filtered = [c for c in children if c is not None]
+        clause = str(filtered[0])
+        branches = [c for c in filtered[1:] if isinstance(c, DecideBranchBlock)]
+        none_branch = next((c for c in filtered[1:] if isinstance(c, NoneBranchBlock)), None)
+        return DecideBlock(decide_type="ON", raw_clause=clause, branches=branches, none_branch=none_branch)
+
+    def decide_for_block(self, children) -> DecideBlock:
+        filtered = [c for c in children if c is not None]
+        branches = [c for c in filtered if isinstance(c, DecideBranchBlock)]
+        none_branch = next((c for c in filtered if isinstance(c, NoneBranchBlock)), None)
+        return DecideBlock(decide_type="FOR", raw_clause="", branches=branches, none_branch=none_branch)
+
+    def subroutine_block(self, children) -> SubroutineBlock:
+        filtered = [c for c in children if c is not None]
+        name = str(filtered[0]).strip().upper()
+        body = filtered[1:]
+        return SubroutineBlock(name=name, body=body)
 
     def module(self, children) -> list:
         return [c for c in children if c is not None]

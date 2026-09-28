@@ -1,0 +1,31 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #FIRST (A10)
+1 #LAST  (A10)
+1 #FULL  (A25)
+END-DEFINE
+COMPRESS #FIRST #LAST INTO #FULL WITH DELIMITER ' '
+
+=== PYTHON ===
+class CompressContext:
+    def __init__(self):
+        self.first = ""
+        self.last = ""
+        self.full = ""
+
+def execute_compress(ctx: CompressContext, session):
+    ctx.full = ' '.join([str(ctx.first), str(ctx.last)])
+    return ctx
+
+=== EXECUTE ===
+- input:
+    first: "John"
+    last: "Doe"
+  expected:
+    full: "John Doe"
+
+- input:
+    first: "Ada"
+    last: "Lovelace"
+  expected:
+    full: "Ada Lovelace"

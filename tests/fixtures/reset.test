@@ -1,0 +1,32 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #NAME    (A10)
+1 #COUNT   (I4)
+1 #AMOUNT  (P7.2)
+END-DEFINE
+RESET #NAME #COUNT #AMOUNT
+
+=== PYTHON ===
+from decimal import Decimal
+
+class ResetContext:
+    def __init__(self):
+        self.name = ""
+        self.count = 0
+        self.amount = Decimal('0')
+
+def execute_reset(ctx: ResetContext, session):
+    ctx.name = ""
+    ctx.count = 0
+    ctx.amount = Decimal('0')
+    return ctx
+
+=== EXECUTE ===
+- input:
+    name: "ACTIVE"
+    count: 42
+    amount: "123.45"
+  expected:
+    name: ""
+    count: 0
+    amount: "0"

@@ -1,0 +1,34 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #VAL   (I4)
+1 #RES   (I4)
+END-DEFINE
+PERFORM DOUBLE-IT
+DEFINE SUBROUTINE DOUBLE-IT
+    #RES := #VAL * 2
+END-SUBROUTINE
+
+=== PYTHON ===
+class SubroutineContext:
+    def __init__(self):
+        self.val = 0
+        self.res = 0
+
+def sub_double_it(ctx: SubroutineContext, session):
+    ctx.res = (ctx.val * 2)
+    return ctx
+
+def execute_subroutine(ctx: SubroutineContext, session):
+    sub_double_it(ctx, session)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    val: 21
+  expected:
+    res: 42
+
+- input:
+    val: 50
+  expected:
+    res: 100

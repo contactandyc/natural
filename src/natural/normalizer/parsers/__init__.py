@@ -14,6 +14,10 @@ from .math_parser import MathParser
 from .callnat_parser import CallnatParser
 from .io_parser import IOParser
 from .decide_parser import DecideParser
+from .for_parser import ForParser
+from .string_parser import StringOpParser
+from .database_parser import DatabaseOpParser
+from .workfile_parser import WorkFileParser
 
 __all__ = [
     "ExpressionParser",
@@ -29,4 +33,8 @@ __all__ = [
     "CallnatParser",
     "IOParser",
     "DecideParser",
+    "ForParser",
+    "StringOpParser",
+    "DatabaseOpParser",
+    "WorkFileParser",
 ]

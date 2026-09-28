@@ -1,0 +1,44 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #AGE       (I4)
+1 #HAS_ID    (L)
+1 #ALLOWED   (L)
+END-DEFINE
+IF #AGE >= 21 AND #HAS_ID = TRUE
+    #ALLOWED := TRUE
+ELSE
+    #ALLOWED := FALSE
+END-IF
+
+=== PYTHON ===
+class IfNestedContext:
+    def __init__(self):
+        self.age = 0
+        self.has_id = False
+        self.allowed = False
+
+def execute_if_nested(ctx: IfNestedContext, session):
+    if ((ctx.age >= 21) and (ctx.has_id == True)):
+        ctx.allowed = True
+    else:
+        ctx.allowed = False
+    return ctx
+
+=== EXECUTE ===
+- input:
+    age: 25
+    has_id: true
+  expected:
+    allowed: "True"
+
+- input:
+    age: 19
+    has_id: true
+  expected:
+    allowed: "False"
+
+- input:
+    age: 22
+    has_id: false
+  expected:
+    allowed: "False"
