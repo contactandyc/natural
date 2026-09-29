@@ -10,58 +10,60 @@ Instead of relying on fragile regex replacements or heuristic text rewriting, th
 
 ## Translation Example
 
-### Legacy Natural Input (`SAMPLE.nsp`):
+### Legacy Natural Input (`BONUSCALC.nsp`):
+
 
 ```natural
 DEFINE DATA LOCAL
-01 #OFFSET (I2) INIT<1>
-01 MYVIEW VIEW OF EMPLOYEES
+01 EMPLOYEES VIEW OF EMPLOYEES
   02 NAME
-  02 LANG (#OFFSET:#OFFSET + 5)
-  02 LANG (1:1)
-01 MYVIEW2 VIEW OF EMPLOYEES
-  02 LANG (1:6)
+  02 DEPT
+  02 SALARY
+  02 BONUS
+01 #BONUS-RATE (P3.2) INIT <0.10>
+01 #MIN-SALARY (P7.2) INIT <50000.00>
 END-DEFINE
 
-READ (1) MYVIEW BY NAME STARTING FROM 'SMITH'
-  WRITE 5T LANG (#OFFSET.#OFFSET:#OFFSET + 5) 35T '<== LANG (1:6) AFTER READ'
-  LANG(1.1) := '***'
-  #OFFSET := 2
-  WRITE 5T LANG (1.1) 35T '<== LANG (1.1) AFTER TWO ASSIGNS' /
-        5T LANG (#OFFSET.#OFFSET:#OFFSET + 4) 35T '<== LANG (2:6) AFTER TWO ASSIGNS'
+READ (5) EMPLOYEES BY NAME STARTING FROM 'A'
+  REJECT IF SALARY < #MIN-SALARY
+  IF DEPT = 'SALES'
+    #BONUS-RATE := 0.15
+  ELSE
+    #BONUS-RATE := 0.10
+  END-IF
+  BONUS := SALARY * #BONUS-RATE
+  WRITE 5T NAME 25T DEPT 35T SALARY 45T BONUS
   UPDATE
-  GET MYVIEW2 *ISN
-  WRITE 5T MYVIEW2.LANG (1:6) 35T '<== AFTER UPDATE AND GET' / 5T '-' (55)
-  #OFFSET := 1
 END-READ
+END TRANSACTION
 END
-
 ```
 
-### Emitted Python Target (`sample.py`):
+### Emitted Python Target (`bonuscalc.py`):
 
 ```python
+from decimal import Decimal
 from target_orm import Employees
 
-class SampleContext:
+class BonuscalcContext:
     def __init__(self):
-        self.offset = 1
+        self.bonus_rate = Decimal('0.10')
+        self.min_salary = Decimal('50000.00')
 
-def execute_sample(ctx: SampleContext, session):
-    for loop_idx, record in enumerate(session.query(Employees).filter((Employees.name >= 'SMITH')), 1):
+def execute_bonuscalc(ctx: BonuscalcContext, session):
+    for loop_idx, record in enumerate(session.query(Employees).filter((Employees.name >= 'A')).limit(5), 1):
         loop_counter = loop_idx
-        print(" " * 4 + str(record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 5)]) + " " * (34 - len("    " + str(record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 5)]))) + "<== LANG (1:6) AFTER READ")
-        record.lang[0][0] = '***'
-        ctx.offset = 2
-        print(" " * 4 + str(record.lang[0][0]) + " " * (34 - len("    " + str(record.lang[0][0]))) + "<== LANG (1.1) AFTER TWO ASSIGNS")
-        print(" " * 4 + str(record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 4)]) + " " * (34 - len("    " + str(record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 4)]))) + "<== LANG (2:6) AFTER TWO ASSIGNS")
+        if (record.salary < ctx.min_salary):
+            continue
+        if (record.dept == 'SALES'):
+            ctx.bonus_rate = Decimal('0.15')
+        else:
+            ctx.bonus_rate = Decimal('0.10')
+        record.bonus = (record.salary * ctx.bonus_rate)
+        print(" " * 4 + str(record.name) + " " * max(0, 24 - len("    " + str(record.name))) + str(record.dept) + " " * max(0, 34 - len("    " + str(record.name) + " " * max(0, 24 - len("    " + str(record.name))) + str(record.dept))) + str(record.salary) + " " * max(0, 44 - len("    " + str(record.name) + " " * max(0, 24 - len("    " + str(record.name))) + str(record.dept) + " " * max(0, 34 - len("    " + str(record.name) + " " * max(0, 24 - len("    " + str(record.name))) + str(record.dept))) + str(record.salary))) + str(record.bonus))
         session.flush()  # UPDATE committed for active loop
-        myview2_record = session.get(Employees, record.id)
-        print(" " * 4 + str(myview2_record.lang[(1 - 1):(1 - 1) + 6]) + " " * (34 - len("    " + str(myview2_record.lang[(1 - 1):(1 - 1) + 6]))) + "<== AFTER UPDATE AND GET")
-        print(" " * 4 + "-------------------------------------------------------")
-        ctx.offset = 1
+    session.commit()
     return ctx
-
 ```
 
 ---

@@ -17,6 +17,8 @@ class PythonExpressionEmitter:
     def emit_expr(self, expr: SemanticExpression, model_class: Optional[str] = None) -> str:
         if expr.op in ("ref", "entity_field"):
             base_ref = self.ctx.resolve_ref(expr.symbol_id, model_class=model_class)
+            sym = self.ctx.get_symbol(expr.symbol_id) if expr.symbol_id else None
+
             if getattr(expr, "array_indices", None):
                 for idx in expr.array_indices:
                     if idx.op == "literal" and isinstance(idx.value, int):
@@ -24,17 +26,22 @@ class PythonExpressionEmitter:
                     else:
                         idx_val = self.emit_expr(idx, model_class=model_class)
                         base_ref = f"{base_ref}[({idx_val} - 1)]"
+
             if expr.substring:
                 start_val = self.emit_expr(expr.substring.start, model_class=model_class)
                 s_idx = f"({start_val} - 1)"
                 if expr.substring.length:
                     end_val = self.emit_expr(expr.substring.length, model_class=model_class)
-                    # If array_indices is present, it's an array bound (start:end), not a string (start:len)
-                    if getattr(expr, "array_indices", None):
+
+                    # Disambiguate array slices (LANG(1:6)) from string substrings (STR(1:6))
+                    is_array_slice = (sym and sym.is_array and not expr.array_indices) or expr.array_indices
+
+                    if is_array_slice:
                         return f"{base_ref}[{s_idx}:{end_val}]"
                     return f"{base_ref}[{s_idx}:{s_idx} + {end_val}]"
                 return f"{base_ref}[{s_idx}:]"
             return base_ref
+
         elif expr.op == "func_call":
             if expr.symbol_id in ("len", "max", "min", "abs", "int", "str"):
                 fn_name = expr.symbol_id

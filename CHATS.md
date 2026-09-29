@@ -705,3 +705,29 @@ Extracted shared code generation primitives into `src/natural/codegen/common/`, 
 * **PythonEmitter Context Integration (`codegen/python_emitter/context.py`)**:
 * Replaced internal writer logic in `EmitterContext` with `CodeWriter` and delegated naming transformations to `codegen.common`.
 * Ensures naming consistency between generated ORM models and runtime query references without coupling their compilation pipelines.
+
+---
+
+# Chat - Bug Fixes: Array Tracking, Slices, Tabulation & Query Limits - https://share.gemini.google/y6rLtvRy9Hed
+
+Resolved edge-case bugs in code emission affecting database queries, array mutation tracking, variable slicing, and UI tabulation, alongside test harness improvements.
+
+### Summary of Changes
+
+- **Query Limit Propagation (`read_parser.py`)**:
+    - Added `limit` token extraction to `ReadTransformer` so bounded queries (e.g., `READ (5)`) correctly capture the limit and emit `.limit(5)` in SQLAlchemy rather than iterating the entire table.
+
+- **ORM Array Mutation Tracking (`orm_emitter.py`)**:
+    - Wrapped Adabas PE and MU `JSON` columns in SQLAlchemy's `MutableList.as_mutable(JSON)`. This forces SQLAlchemy to track in-place element assignments (`record.lang[0][0] = '***'`) and successfully persist them on `session.flush()`.
+
+- **Array Slice vs. String Substring Disambiguation (`expressions.py`)**:
+    - Updated `PythonExpressionEmitter` to inspect symbol metadata (`sym.is_array`) during slice generation.
+    - Array ranges `LANG(1:6)` now correctly emit Python slice bounds `[start:end]` instead of relative string length splicing `[start:start + length]`.
+
+- **Safe Tabulation Padding (`io.py`)**:
+    - Wrapped string length subtraction calculations generated for absolute tab stops (`35T`) in `max(0, target_col - len(val))`. This prevents negative string multiplication errors when dynamically sized values bleed past their allotted column widths.
+
+- **Test Harness & Documentation (`test_fixtures.py`, `README.md`)**:
+    - Upgraded the `MockSession` test harness to auto-cast floats and decimal-formatted strings into Python `Decimal` objects during mock record instantiation, preventing `str` vs `Decimal` comparison crashes in dynamic test evaluation.
+    - Replaced the abstract array-manipulation `SAMPLE.nsp` code in `README.md` with a practical, business-logic-focused `BONUSCALC.nsp` example.
+    - Added `tests/fixtures/readme.test` to enforce the new documentation snippet, and updated legacy snapshots to reflect the new `limit()` and `max()` codegen behaviors.

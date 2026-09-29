@@ -12,7 +12,7 @@ class IoTabulationContext:
 
 def execute_io_tabulation(ctx: IoTabulationContext, session):
     ctx.status = 'COMPLETED'
-    print(" " * 4 + "A" + " " * (34 - len("    A")) + "B")
+    print(" " * 4 + "A" + " " * max(0, 34 - len("    A")) + "B")
     print(" " * 4 + "C")
     return ctx
 

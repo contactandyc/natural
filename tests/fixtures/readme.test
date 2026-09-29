@@ -1,0 +1,73 @@
+=== NATURAL: EMPLOYEES.ddm ===
+1 AC NAME                 A  20  N N
+1 AD DEPT                 A  10  N N
+1 AE SALARY               P 7.2  N N
+1 AF BONUS                P 7.2  N N
+
+=== NATURAL: BONUSCALC.nsp ===
+DEFINE DATA LOCAL
+01 EMPLOYEES VIEW OF EMPLOYEES
+  02 NAME
+  02 DEPT
+  02 SALARY
+  02 BONUS
+01 #BONUS-RATE (P3.2) INIT <0.10>
+01 #MIN-SALARY (P7.2) INIT <50000.00>
+END-DEFINE
+
+READ (5) EMPLOYEES BY NAME STARTING FROM 'A'
+  REJECT IF SALARY < #MIN-SALARY
+  IF DEPT = 'SALES'
+    #BONUS-RATE := 0.15
+  ELSE
+    #BONUS-RATE := 0.10
+  END-IF
+  BONUS := SALARY * #BONUS-RATE
+  WRITE 5T NAME 25T DEPT 35T SALARY 45T BONUS
+  UPDATE
+END-READ
+END TRANSACTION
+END
+
+=== PYTHON: bonuscalc.py ===
+from decimal import Decimal
+from target_orm import Employees
+
+class BonuscalcContext:
+    def __init__(self):
+        self.bonus_rate = Decimal('0.10')
+        self.min_salary = Decimal('50000.00')
+
+def execute_bonuscalc(ctx: BonuscalcContext, session):
+    for loop_idx, record in enumerate(session.query(Employees).filter((Employees.name >= 'A')).limit(5), 1):
+        loop_counter = loop_idx
+        if (record.salary < ctx.min_salary):
+            continue
+        if (record.dept == 'SALES'):
+            ctx.bonus_rate = Decimal('0.15')
+        else:
+            ctx.bonus_rate = Decimal('0.10')
+        record.bonus = (record.salary * ctx.bonus_rate)
+        print(" " * 4 + str(record.name) + " " * max(0, 24 - len("    " + str(record.name))) + str(record.dept) + " " * max(0, 34 - len("    " + str(record.name) + " " * max(0, 24 - len("    " + str(record.name))) + str(record.dept))) + str(record.salary) + " " * max(0, 44 - len("    " + str(record.name) + " " * max(0, 24 - len("    " + str(record.name))) + str(record.dept) + " " * max(0, 34 - len("    " + str(record.name) + " " * max(0, 24 - len("    " + str(record.name))) + str(record.dept))) + str(record.salary))) + str(record.bonus))
+        session.flush()  # UPDATE committed for active loop
+    session.commit()
+    return ctx
+
+=== EXECUTE ===
+- input:
+    bonus_rate: "0.10"
+  records:
+    - name: "ALICE"
+      dept: "SALES"
+      salary: "60000.00"
+      bonus: "0"
+    - name: "BOB"
+      dept: "IT"
+      salary: "40000.00"
+      bonus: "0"
+    - name: "CHARLIE"
+      dept: "IT"
+      salary: "70000.00"
+      bonus: "0"
+  expected:
+    bonus_rate: "0.10"

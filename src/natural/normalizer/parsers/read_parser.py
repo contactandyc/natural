@@ -31,6 +31,9 @@ class ReadTransformer(Transformer):
     def descriptor(self, tokens):
         return ("desc", str(tokens[0]))
 
+    def limit(self, tokens):
+        return ("limit", int(tokens[0]))
+
     def operand(self, tokens):
         val = str(tokens[0])
         kind = "literal" if val.isdigit() or val.startswith("'") else "ref"
@@ -45,6 +48,8 @@ class ReadTransformer(Transformer):
                     stmt.view_name = child[1]
                 elif child[0] == "desc":
                     stmt.by_descriptor = child[1]
+                elif child[0] == "limit":
+                    stmt.limit = child[1]
             elif isinstance(child, Expression):
                 stmt.starting_from = child
 

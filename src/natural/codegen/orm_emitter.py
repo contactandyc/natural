@@ -25,6 +25,7 @@ class ORMEmitter:
     def generate(self) -> str:
         self.emit_line("from decimal import Decimal")
         self.emit_line("from sqlalchemy import Column, String, Numeric, Integer, Boolean, JSON")
+        self.emit_line("from sqlalchemy.ext.mutable import MutableList")
         self.emit_line("from sqlalchemy.orm import declarative_base")
         self.emit_line("")
         self.emit_line("Base = declarative_base()")
@@ -59,7 +60,7 @@ class ORMEmitter:
                         else:
                             default_expr = f'lambda: [None for _ in range({dim})]'
                         pk_arg = ", primary_key=True" if i == 0 else ""
-                        self.emit_line(f"{col_name} = Column('{field.name.lower()}', JSON, default={default_expr}{pk_arg})")
+                        self.emit_line(f"{col_name} = Column('{field.name.lower()}', MutableList.as_mutable(JSON), default={default_expr}{pk_arg})")
                     elif kind == "alphanumeric":
                         length = ''.join(filter(str.isdigit, raw_spec))
                         length = length if length else "255"

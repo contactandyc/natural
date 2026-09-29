@@ -52,7 +52,7 @@ def emit_write(
                     else:
                         if all(kind == "literal" for kind, _ in sim_parts):
                             sim_str = "".join(val for _, val in sim_parts)
-                            code_parts.append(f'" " * ({target_col} - len("{sim_str}"))')
+                            code_parts.append(f'" " * max(0, {target_col} - len("{sim_str}"))')
                             curr_len = len(sim_str)
                             diff = max(0, target_col - curr_len)
                             sim_parts.append(("literal", " " * diff))
@@ -64,7 +64,7 @@ def emit_write(
                                 else:
                                     len_terms.append(val)
                             sim_expr = " + ".join(len_terms)
-                            code_parts.append(f'" " * ({target_col} - len({sim_expr}))')
+                            code_parts.append(f'" " * max(0, {target_col} - len({sim_expr}))')
                             sim_parts.append(("expr", f'" " * max(0, {target_col} - len({sim_expr}))'))
                 else:
                     if e.op == "literal" and isinstance(e.value, str):

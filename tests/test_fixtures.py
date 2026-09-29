@@ -265,9 +265,20 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
         console.print(f"[bold cyan]5. Executing Test Cases against '{entrypoint_stem}.py':[/bold cyan]")
 
     for i, case in enumerate(test_cases, 1):
-        session = MockSession(
-            [type("Record", (), r)() for r in case.get("records", [])]
-        )
+
+        # --- FIX: Type cast numeric strings/floats to Decimal for the mock ORM records ---
+        mock_records = []
+        for r_dict in case.get("records", []):
+            rec = type("Record", (), {})()
+            for k, v in r_dict.items():
+                if isinstance(v, float) or (isinstance(v, str) and re.match(r"^-?\d+\.\d+$", v)):
+                    setattr(rec, k, Decimal(str(v)))
+                else:
+                    setattr(rec, k, v)
+            mock_records.append(rec)
+
+        session = MockSession(mock_records)
+
         ctx = ctx_class()
         for field, val in case.get("input", {}).items():
             default_val = getattr(ctx, field, None)
