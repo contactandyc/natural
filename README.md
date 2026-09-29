@@ -372,3 +372,34 @@ from target_orm import Employees
         └── user_function.test              # DEFINE FUNCTION typed methods
 
 ```
+
+
+---
+
+# Chat - https://share.gemini.google/VvnggbCkY7UC - Semantic Lowering Modular Architecture Refactor
+
+Refactored the monolithic `lowering.py` (~780 lines) into a decoupled, domain-driven package (`src/natural/normalizer/lowering/`) with isolated context management, dedicated expression lowering, and registry-based statement dispatch.
+
+---
+
+### Summary of Changes
+
+- **State & Scope Encapsulation (`lowering/context.py`)**:
+    - Extracted `LoweringContext` and `ActiveLoopContext` out of the lowering traversal logic.
+    - Centralized symbol table construction, format parsing (`parse_format`), loop stack state, function symbol scopes, DDM/view definition lookups, and scoped field resolution (`get_fields_for_scope`, `resolve_ref`, `resolve_target_loop`).
+
+- **Dedicated Expression Engine (`lowering/expressions.py`)**:
+    - Isolated `ExpressionLowerer` to convert AST expressions to Semantic DAG expressions.
+    - Handles system variables (`*OCC`, `*COUNTER`, `*ISN`, `*NUMBER`, `*DATX`, `*TIME`), array indexing, dynamic slicing, function invocations, and automatic decomposition of DDM superdescriptors into boolean slice conjunctions.
+
+- **Domain-Specific Statement Handlers (`lowering/handlers/`)**:
+    - Replaced the large conditional `if isinstance(stmt, ...)` ladder with a registry-based dispatch table (`DEFAULT_HANDLERS`) mapping statement AST classes directly to specialized handler functions:
+        - **`handlers/memory.py`**: `ASSIGN`, `MOVE`, `MOVE BY NAME`, `COMPRESS`, `SEPARATE`, `EXAMINE`, `RESET`, `RESIZE ARRAY`.
+        - **`handlers/database.py`**: `FIND`, `READ`, `HISTOGRAM`, `GET`, `GET SAME`, `UPDATE`, `DELETE`, `STORE`, `ACCEPT`, `REJECT`, `END TRANSACTION`, `BACKOUT TRANSACTION`, `AT START OF DATA`, `AT END OF DATA`, and `AT BREAK`.
+        - **`handlers/control_flow.py`**: `IF`, `DECIDE ON/FOR`, `REPEAT`, `FOR`, `ESCAPE`, `STOP`, `TERMINATE`, and `ON ERROR`.
+        - **`handlers/invocation.py`**: `PERFORM`, `CALLNAT`, and `FETCH` (including by-reference caller-callee bindings).
+        - **`handlers/io.py`**: `WRITE`, `PRINT`, `READ WORK FILE`, `WRITE WORK FILE`, and `CLOSE WORK FILE`.
+
+- **Orchestration & Public API Compatibility (`lowering/engine.py`, `lowering/__init__.py`)**:
+    - Implemented `SemanticLoweringPass` in `engine.py` to drive the compilation pipeline, coordinate symbol building, lower subroutines/functions, and dispatch statements via the handler registry.
+    - Re-exported `SemanticLoweringPass`, `LoweringContext`, `ActiveLoopContext`, and `ExpressionLowerer` from `natural.normalizer.lowering`, ensuring zero breaking changes for `cli.py`, `builder.py`, and test harnesses.

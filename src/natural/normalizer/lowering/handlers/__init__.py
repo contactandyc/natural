@@ -1,0 +1,143 @@
+# SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+# Maintainer: Andy Curtis <contactandyc@gmail.com>
+
+from typing import Callable, Dict, Type
+from natural.ir.models import (
+    AcceptStatement,
+    AssignStatement,
+    AtBreakStatement,
+    AtEndOfDataStatement,
+    AtStartOfDataStatement,
+    BackoutTransactionStatement,
+    CallnatStatement,
+    CloseWorkFileStatement,
+    CompressStatement,
+    ConditionalStatement,
+    DecideStatement,
+    DeleteStatement,
+    EndTransactionStatement,
+    EscapeStatement,
+    ExamineStatement,
+    FetchStatement,
+    FindStatement,
+    ForStatement,
+    GetSameStatement,
+    GetStatement,
+    HistogramStatement,
+    LoopStatement,
+    MoveByNameStatement,
+    MoveStatement,
+    OnErrorBlockStatement,
+    PerformStatement,
+    PrintStatement,
+    ReadStatement,
+    ReadWorkFileStatement,
+    RejectStatement,
+    ResetStatement,
+    ResizeArrayStatement,
+    SeparateStatement,
+    Statement,
+    StopStatement,
+    StoreStatement,
+    TerminateStatement,
+    UpdateStatement,
+    WriteStatement,
+    WriteWorkFileStatement,
+)
+from natural.normalizer.lowering.handlers.control_flow import (
+    lower_conditional,
+    lower_decide,
+    lower_escape,
+    lower_for,
+    lower_loop,
+    lower_on_error,
+    lower_terminate,
+)
+from natural.normalizer.lowering.handlers.database import (
+    lower_accept,
+    lower_at_break,
+    lower_at_end,
+    lower_at_start,
+    lower_backout_transaction,
+    lower_delete,
+    lower_end_transaction,
+    lower_find,
+    lower_get,
+    lower_get_same,
+    lower_histogram,
+    lower_read,
+    lower_reject,
+    lower_store,
+    lower_update,
+)
+from natural.normalizer.lowering.handlers.invocation import (
+    lower_callnat,
+    lower_fetch,
+    lower_perform,
+)
+from natural.normalizer.lowering.handlers.io import (
+    lower_close_work_file,
+    lower_io_write,
+    lower_read_work_file,
+    lower_write_work_file,
+)
+from natural.normalizer.lowering.handlers.memory import (
+    lower_assign,
+    lower_compress,
+    lower_examine,
+    lower_move,
+    lower_move_by_name,
+    lower_reset,
+    lower_resize_array,
+    lower_separate,
+)
+
+DEFAULT_HANDLERS: Dict[Type[Statement], Callable] = {
+    # Memory & data movement
+    AssignStatement: lower_assign,
+    MoveByNameStatement: lower_move_by_name,
+    MoveStatement: lower_move,
+    CompressStatement: lower_compress,
+    SeparateStatement: lower_separate,
+    ExamineStatement: lower_examine,
+    ResetStatement: lower_reset,
+    ResizeArrayStatement: lower_resize_array,
+    # Database & queries
+    FindStatement: lower_find,
+    ReadStatement: lower_read,
+    HistogramStatement: lower_histogram,
+    GetStatement: lower_get,
+    GetSameStatement: lower_get_same,
+    UpdateStatement: lower_update,
+    DeleteStatement: lower_delete,
+    StoreStatement: lower_store,
+    AcceptStatement: lower_accept,
+    RejectStatement: lower_reject,
+    EndTransactionStatement: lower_end_transaction,
+    BackoutTransactionStatement: lower_backout_transaction,
+    AtStartOfDataStatement: lower_at_start,
+    AtEndOfDataStatement: lower_at_end,
+    AtBreakStatement: lower_at_break,
+    # Control flow & execution
+    ConditionalStatement: lower_conditional,
+    DecideStatement: lower_decide,
+    LoopStatement: lower_loop,
+    ForStatement: lower_for,
+    EscapeStatement: lower_escape,
+    StopStatement: lower_terminate,
+    TerminateStatement: lower_terminate,
+    OnErrorBlockStatement: lower_on_error,
+    # Program invocations
+    PerformStatement: lower_perform,
+    CallnatStatement: lower_callnat,
+    FetchStatement: lower_fetch,
+    # Formatted I/O & work files
+    WriteStatement: lower_io_write,
+    PrintStatement: lower_io_write,
+    WriteWorkFileStatement: lower_write_work_file,
+    CloseWorkFileStatement: lower_close_work_file,
+    ReadWorkFileStatement: lower_read_work_file,
+}
+
+__all__ = ["DEFAULT_HANDLERS"]
