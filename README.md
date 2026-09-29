@@ -679,3 +679,33 @@ Run the test suite to execute in-memory compilation and dynamic validation again
 
 Make "MOVE BY NAME" work
 
+---
+
+# Chat - https://share.gemini.google/cTMefFE2SGw0
+
+### Summary of Changes
+
+* **Exponentiation & Modulo Operators (`expression_parser.py`, `lowering.py`, `python_emitter.py`)**:
+* Added grammar rules and token precedence for exponentiation (`**`, `^`) above standard multiplication.
+* Added `%` and `MOD` token recognition to `MULT_OP`, lowering to Python `%` via the `"modulo"` semantic operation.
+* Added tests in `tests/fixtures/exponentiation.test`.
+
+
+* **Arithmetic `GIVING` & `DIVIDE ... REMAINDER` (`math_parser.py`)**:
+* Updated `MathParser` regex and logic to handle explicit destination targets via `GIVING <var>`.
+* Added `REMAINDER <var>` extraction for `DIVIDE` statements, emitting a preceding modulo assignment (`%`) before the quotient assignment to protect mutated dividends.
+
+
+* **`COMPRESS ... LEAVING NO SPACE` (`string_parser.py`, `models.py`, `semantic.py`, `lowering.py`, `python_emitter.py`)**:
+* Added `LEAVING NO [SPACE]` flag parsing in `StringOpParser`.
+* Propagated `leaving_no_space: bool` through `CompressStatement` (IR0) and `CompressOp` (IR1).
+* Lowered code generation to join with `''` instead of the default `' '`.
+* Added tests in `tests/fixtures/compress_leaving_no_space.test`.
+
+
+* **Robust String-to-Numeric Unmasking (`python_emitter.py`)**:
+* Overhauled string-to-decimal and string-to-integer conversion logic.
+* Correctly strips non-numeric decorative characters (`$`, `,`, spaces, `+`).
+* Identifies and preserves negative values from trailing signs (`-`), accounting suffixes (`CR`, `DB`), and parenthesized numbers (`(val)`).
+* Automatically flags `needs_decimal` import harvesting when string-to-decimal conversions occur.
+* Added tests in `tests/fixtures/move_unmask_decimal.test`.

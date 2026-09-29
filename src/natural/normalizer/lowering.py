@@ -222,7 +222,6 @@ class SemanticLoweringPass:
                 seen_norms.add(norm)
                 results.append((norm, sym_id, orig_name))
 
-        # 1. Match against active query loop scopes
         matched_loop_ctx = None
         for ctx in reversed(self.loop_stack):
             v_name = ctx.view_name.upper() if ctx.view_name else ""
@@ -261,7 +260,6 @@ class SemanticLoweringPass:
             if results:
                 return results
 
-        # 2. Match against workspace DDMs
         if self.workspace:
             ddm = self.workspace.get_ddm(raw_name)
             if not ddm and not raw_name.endswith("-VIEW"):
@@ -276,7 +274,6 @@ class SemanticLoweringPass:
                 if results:
                     return results
 
-        # 3. Match against group records defined inside data areas
         for area in self.ast.data_areas:
             fields = list(area.inline_fields)
             if not fields and self.workspace:
@@ -309,7 +306,6 @@ class SemanticLoweringPass:
             if results:
                 return results
 
-        # 4. Match against entire data area by name
         for area in self.ast.data_areas:
             area_raw = area.name.upper()
             area_clean = area_raw.replace("#", "").replace("-", "_")
@@ -327,7 +323,6 @@ class SemanticLoweringPass:
                 if results:
                     return results
 
-        # 5. Match against workspace external data areas
         if self.workspace:
             data_area = self.workspace.get_data_area(raw_name, scope=None)
             if not data_area and (raw_name.startswith("#") or clean_name != raw_name):
@@ -386,6 +381,8 @@ class SemanticLoweringPass:
         elif expr.kind == "binary_op":
             op_map = {
                 "*": "multiply", "+": "add", "-": "subtract", "/": "divide",
+                "%": "modulo", "MOD": "modulo",
+                "**": "power", "^": "power",
                 ">": "gt", "<": "lt", "=": "eq", ">=": "gte", "<=": "lte", "<>": "neq",
                 "AND": "and", "OR": "or",
             }
@@ -528,6 +525,7 @@ class SemanticLoweringPass:
                     operands=[self.lower_expr(op) for op in stmt.operands],
                     delimiter=self.lower_expr(stmt.delimiter) if stmt.delimiter else None,
                     with_delimiters=stmt.with_delimiters,
+                    leaving_no_space=stmt.leaving_no_space,
                 )
             ]
         elif isinstance(stmt, SeparateStatement):

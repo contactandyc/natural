@@ -1,0 +1,31 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #FIRST (A10)
+1 #LAST  (A10)
+1 #FULL  (A20)
+END-DEFINE
+COMPRESS #FIRST #LAST INTO #FULL LEAVING NO SPACE
+
+=== PYTHON ===
+class CompressLeavingNoSpaceContext:
+    def __init__(self):
+        self.first = ""
+        self.last = ""
+        self.full = ""
+
+def execute_compress_leaving_no_space(ctx: CompressLeavingNoSpaceContext, session):
+    ctx.full = ''.join([str(ctx.first), str(ctx.last)])
+    return ctx
+
+=== EXECUTE ===
+- input:
+    first: "John"
+    last: "Doe"
+  expected:
+    full: "JohnDoe"
+
+- input:
+    first: "ABC"
+    last: "123"
+  expected:
+    full: "ABC123"

@@ -162,6 +162,7 @@ class CompressOp(SemanticStatement):
     operands: List[SemanticExpression] = Field(default_factory=list)
     delimiter: Optional[SemanticExpression] = None
     with_delimiters: bool = False
+    leaving_no_space: bool = False
 
 
 class SeparateOp(SemanticStatement):

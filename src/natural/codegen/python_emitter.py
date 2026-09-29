@@ -109,9 +109,10 @@ class PythonEmitter:
             return "date.today()"
         elif expr.op == "sys_time":
             return "datetime.now().time()"
-        elif expr.op in ("multiply", "add", "subtract", "divide", "gt", "lt", "eq", "gte", "lte", "neq", "and", "or"):
+        elif expr.op in ("multiply", "add", "subtract", "divide", "modulo", "power", "gt", "lt", "eq", "gte", "lte", "neq", "and", "or"):
             op_map = {
                 "multiply": "*", "add": "+", "subtract": "-", "divide": "/",
+                "modulo": "%", "power": "**",
                 "gt": ">", "lt": "<", "eq": "==", "gte": ">=", "lte": "<=", "neq": "!=",
                 "and": "and", "or": "or",
             }
@@ -238,8 +239,26 @@ class PythonEmitter:
                     return
                 elif target_sym.semantic_type.base in ("decimal", "numeric") and source_sym.semantic_type.base == "string":
                     src_ref = self._resolve_ref(op.expr.symbol_id)
-                    self.emit_line(f"{target} = Decimal({src_ref}.replace(',', '').replace(' ', '').replace('+', '').replace('-', ''))")
+                    self.emit_line(f"_val = {src_ref}.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')")
+                    self.emit_line(f"_is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))")
+                    self.emit_line(f"_num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()")
+                    self.emit_line(f"{target} = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))")
                     return
+                elif target_sym.semantic_type.base == "integer" and source_sym.semantic_type.base == "string":
+                    src_ref = self._resolve_ref(op.expr.symbol_id)
+                    self.emit_line(f"_val = {src_ref}.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')")
+                    self.emit_line(f"_is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))")
+                    self.emit_line(f"_num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()")
+                    self.emit_line(f"{target} = -int(_num) if _is_neg else (int(_num) if _num else 0)")
+                    return
+
+            if target_sym and target_sym.semantic_type.base in ("decimal", "numeric") and source_sym and source_sym.semantic_type.base == "string":
+                src_ref = self._resolve_ref(op.expr.symbol_id)
+                self.emit_line(f"_val = {src_ref}.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')")
+                self.emit_line(f"_is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))")
+                self.emit_line(f"_num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()")
+                self.emit_line(f"{target} = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))")
+                return
 
             expr = self.emit_expr(op.expr)
             if op.rounded and target_sym and target_sym.semantic_type.base == "decimal":
@@ -265,7 +284,12 @@ class PythonEmitter:
 
         elif isinstance(op, CompressOp):
             target = self._resolve_ref(op.target_id)
-            sep = f"{self.emit_expr(op.delimiter)}" if op.delimiter else "' '"
+            if op.leaving_no_space:
+                sep = "''"
+            elif op.delimiter:
+                sep = f"{self.emit_expr(op.delimiter)}"
+            else:
+                sep = "' '"
             items_str = ", ".join(f"str({self.emit_expr(e)})" for e in op.operands)
             self.emit_line(f"{target} = {sep}.join([{items_str}])")
 
@@ -660,14 +684,15 @@ class PythonEmitter:
                 if isinstance(op, TerminateOp):
                     needs_sys = True
                 if isinstance(op, AssignOp):
+                    target_sym = self._sym_by_id.get(op.target_id)
+                    source_sym = self._sym_by_id.get(op.expr.symbol_id) if op.expr.symbol_id else None
+                    if target_sym and target_sym.semantic_type.base in ("decimal", "numeric") and source_sym and source_sym.semantic_type.base == "string":
+                        needs_decimal = True
                     if op.rounded:
-                        target_sym = self._sym_by_id.get(op.target_id)
                         if target_sym and target_sym.semantic_type.base == "decimal":
                             needs_decimal = True
                             needs_round_half_up = True
                     if op.edit_mask:
-                        target_sym = self._sym_by_id.get(op.target_id)
-                        source_sym = self._sym_by_id.get(op.expr.symbol_id) if op.expr.symbol_id else None
                         if (target_sym and target_sym.semantic_type.base == "date") or (source_sym and source_sym.semantic_type.base == "date"):
                             needs_datetime = True
                 if hasattr(op, "expr"):

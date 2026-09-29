@@ -16,13 +16,16 @@ expr_grammar = r"""
                 | logical_and LOGICAL_AND comparison -> binary_expr
 
     ?comparison: expr
-               | comparison COMP_OP expr             -> binary_expr
+               | comparison COMP_OP expr              -> binary_expr
 
     ?expr: term
          | expr ADD_OP term                          -> binary_expr
 
-    ?term: factor
-         | term MULT_OP factor                       -> binary_expr
+    ?term: power
+         | term MULT_OP power                        -> binary_expr
+
+    ?power: factor
+          | power POWER_OP factor                    -> binary_expr
 
     ?factor: NUMBER                                  -> num_lit
            | STRING                                  -> str_lit
@@ -44,7 +47,8 @@ expr_grammar = r"""
     BOOLEAN_LITERAL.3: "TRUE"i | "FALSE"i
     COMP_OP: ">=" | "<=" | "<>" | ">" | "<" | "="
     ADD_OP: "+" | "-"
-    MULT_OP: "*" | "/"
+    MULT_OP: "*" | "/" | "%" | "MOD"i
+    POWER_OP.2: "**" | "^"
 
     NUMBER.2: /-?\d+(\.\d+)?/
     STRING: /'[^']*'/ | /"[^"]*"/
@@ -87,7 +91,6 @@ class ExpressionTransformer(Transformer):
         var_name = str(tokens[0])
         raw_content = str(tokens[1]).strip()
 
-        # Check for range slice syntax: (start:length) or (start:end)
         if ":" in raw_content:
             parts = raw_content.split(":", 1)
             p1 = ExpressionParser().parse(parts[0].strip())

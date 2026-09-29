@@ -220,6 +220,7 @@ class CompressStatement(Statement):
     target: Expression
     delimiter: Optional[Expression] = None
     with_delimiters: bool = False
+    leaving_no_space: bool = False
 
 
 class SeparateStatement(Statement):

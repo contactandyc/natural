@@ -1,0 +1,71 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #STR_POS  (A15)
+1 #STR_NEG  (A15)
+1 #STR_CR   (A15)
+1 #STR_DB   (A15)
+1 #STR_PAR  (A15)
+1 #NUM_POS  (P7.2)
+1 #NUM_NEG  (P7.2)
+1 #NUM_CR   (P7.2)
+1 #NUM_DB   (P7.2)
+1 #NUM_PAR  (P7.2)
+END-DEFINE
+MOVE #STR_POS TO #NUM_POS
+MOVE #STR_NEG TO #NUM_NEG
+MOVE #STR_CR TO #NUM_CR
+MOVE #STR_DB TO #NUM_DB
+MOVE #STR_PAR TO #NUM_PAR
+
+=== PYTHON ===
+from decimal import Decimal
+
+class MoveUnmaskDecimalContext:
+    def __init__(self):
+        self.str_pos = ""
+        self.str_neg = ""
+        self.str_cr = ""
+        self.str_db = ""
+        self.str_par = ""
+        self.num_pos = Decimal('0')
+        self.num_neg = Decimal('0')
+        self.num_cr = Decimal('0')
+        self.num_db = Decimal('0')
+        self.num_par = Decimal('0')
+
+def execute_move_unmask_decimal(ctx: MoveUnmaskDecimalContext, session):
+    _val = ctx.str_pos.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')
+    _is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))
+    _num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()
+    ctx.num_pos = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))
+    _val = ctx.str_neg.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')
+    _is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))
+    _num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()
+    ctx.num_neg = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))
+    _val = ctx.str_cr.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')
+    _is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))
+    _num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()
+    ctx.num_cr = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))
+    _val = ctx.str_db.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')
+    _is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))
+    _num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()
+    ctx.num_db = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))
+    _val = ctx.str_par.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')
+    _is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))
+    _num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()
+    ctx.num_par = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))
+    return ctx
+
+=== EXECUTE ===
+- input:
+    str_pos: "$1,234.50"
+    str_neg: "450.25-"
+    str_cr: "$  123.45CR"
+    str_db: "$  250.50DB"
+    str_par: "(99.99)"
+  expected:
+    num_pos: "1234.50"
+    num_neg: "-450.25"
+    num_cr: "-123.45"
+    num_db: "-250.50"
+    num_par: "-99.99"

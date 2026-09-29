@@ -1,0 +1,37 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #BASE (I4)
+1 #EXP  (I4)
+1 #RES1 (I4)
+1 #RES2 (I4)
+END-DEFINE
+#RES1 := #BASE ** #EXP
+#RES2 := #BASE ^ 3
+
+=== PYTHON ===
+class ExponentiationContext:
+    def __init__(self):
+        self.base = 0
+        self.exp = 0
+        self.res1 = 0
+        self.res2 = 0
+
+def execute_exponentiation(ctx: ExponentiationContext, session):
+    ctx.res1 = (ctx.base ** ctx.exp)
+    ctx.res2 = (ctx.base ** 3)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    base: 2
+    exp: 4
+  expected:
+    res1: 16
+    res2: 8
+
+- input:
+    base: 3
+    exp: 3
+  expected:
+    res1: 27
+    res2: 27

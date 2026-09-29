@@ -15,7 +15,7 @@ class StringOpParser:
     def __init__(self):
         self.expr_parser = ExpressionParser()
         self.compress_pattern = re.compile(
-            r"^\s*COMPRESS\s+(.+?)\s+INTO\s+([*#\+A-Za-z0-9\-_\.]+)(?:\s+(WITH\s+ALL\s+DELIMITERS?|WITH\s+DELIMITERS?)\s+(.+?))?\s*$",
+            r"^\s*COMPRESS\s+(.+?)\s+INTO\s+([*#\+A-Za-z0-9\-_\.]+)(?:\s+(LEAVING\s+NO(?:\s+SPACE)?))?(?:\s+(WITH\s+ALL\s+DELIMITERS?|WITH\s+DELIMITERS?)\s+(.+?))?(?:\s+(LEAVING\s+NO(?:\s+SPACE)?))?\s*$",
             re.IGNORECASE,
         )
         self.examine_replace = re.compile(
@@ -47,18 +47,22 @@ class StringOpParser:
 
         operands_raw = m.group(1).split()
         target_raw = m.group(2).strip()
-        delim_clause = m.group(3)
-        delim_val_raw = m.group(4)
+        leaving_no_1 = m.group(3)
+        delim_clause = m.group(4)
+        delim_val_raw = m.group(5)
+        leaving_no_2 = m.group(6)
 
         operands = [self.expr_parser.parse(op) for op in operands_raw]
         target = self.expr_parser.parse(target_raw)
         delim = self.expr_parser.parse(delim_val_raw.strip()) if delim_val_raw else None
+        leaving_no = bool(leaving_no_1 or leaving_no_2)
 
         return CompressStatement(
             operands=operands,
             target=target,
             delimiter=delim,
             with_delimiters=bool(delim_clause),
+            leaving_no_space=leaving_no,
         )
 
     def parse_separate(self, raw_statement: str) -> SeparateStatement:
