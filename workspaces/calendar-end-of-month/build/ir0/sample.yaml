@@ -44,17 +44,29 @@ body:
   body:
   - statement_type: WRITE
     items:
-    - kind: literal
+    - kind: tab
       value: 5
     - kind: ref
-      value: T
-    - kind: ref
       value: LANG
-      array_dim: (#OFFSET.#OFFSET:#OFFSET + 5)
-    - kind: literal
+      array_dim: '#OFFSET.#OFFSET:#OFFSET + 5'
+      array_indices:
+      - kind: ref
+        value: '#OFFSET'
+      substring:
+        start:
+          kind: ref
+          value: '#OFFSET'
+        length:
+          kind: binary_op
+          operator: +
+          left:
+            kind: ref
+            value: '#OFFSET'
+          right:
+            kind: literal
+            value: 5
+    - kind: tab
       value: 35
-    - kind: ref
-      value: T
     - kind: literal
       value: <== LANG (1:6) AFTER READ
   - statement_type: ASSIGN
@@ -81,32 +93,45 @@ body:
     rounded: false
   - statement_type: WRITE
     items:
-    - kind: literal
+    - kind: tab
       value: 5
     - kind: ref
-      value: T
-    - kind: ref
       value: LANG
-      array_dim: (1.1)
-    - kind: literal
+      array_dim: '1.1'
+      array_indices:
+      - kind: literal
+        value: 1
+      - kind: literal
+        value: 1
+    - kind: tab
       value: 35
-    - kind: ref
-      value: T
     - kind: literal
       value: <== LANG (1.1) AFTER TWO ASSIGNS
-    - kind: literal
+    - kind: newline
       value: /
-    - kind: literal
+    - kind: tab
       value: 5
     - kind: ref
-      value: T
-    - kind: ref
       value: LANG
-      array_dim: (#OFFSET.#OFFSET:#OFFSET + 4)
-    - kind: literal
+      array_dim: '#OFFSET.#OFFSET:#OFFSET + 4'
+      array_indices:
+      - kind: ref
+        value: '#OFFSET'
+      substring:
+        start:
+          kind: ref
+          value: '#OFFSET'
+        length:
+          kind: binary_op
+          operator: +
+          left:
+            kind: ref
+            value: '#OFFSET'
+          right:
+            kind: literal
+            value: 4
+    - kind: tab
       value: 35
-    - kind: ref
-      value: T
     - kind: literal
       value: <== LANG (2:6) AFTER TWO ASSIGNS
   - statement_type: UPDATE
@@ -117,25 +142,25 @@ body:
       value: '*ISN'
   - statement_type: WRITE
     items:
-    - kind: literal
+    - kind: tab
       value: 5
-    - kind: ref
-      value: T
     - kind: ref
       value: MYVIEW2.LANG
-      array_dim: (1:6)
-    - kind: literal
+      substring:
+        start:
+          kind: literal
+          value: 1
+        length:
+          kind: literal
+          value: 6
+    - kind: tab
       value: 35
-    - kind: ref
-      value: T
     - kind: literal
       value: <== AFTER UPDATE AND GET
-    - kind: literal
+    - kind: newline
       value: /
-    - kind: literal
+    - kind: tab
       value: 5
-    - kind: ref
-      value: T
     - kind: literal
       value: '-------------------------------------------------------'
   - statement_type: ASSIGN

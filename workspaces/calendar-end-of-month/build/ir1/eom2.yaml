@@ -11,6 +11,7 @@ symbols:
       storage: date
     redefine_offset: 0
     is_array: false
+    init_val: D'01/28/2006'
   '#T':
     id: sym.local.t
     name: '#T'
@@ -127,3 +128,12 @@ operations:
       op: literal
       value: 1
   rounded: false
+- op: write
+  operands:
+  - op: literal
+    value: 'EOM:'
+  - op: ref
+    symbol_id: sym.local.date
+  - op: ref
+    symbol_id: sym.local.d
+  is_write: false

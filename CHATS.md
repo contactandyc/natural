@@ -543,6 +543,40 @@ All requirements outlined in **Phase 4: Advanced Schema, Arrays & Adabas Complex
 * Added `tab` and `newline` kinds to syntactic `Expression`.
 * Introduced `WriteOp(operands, is_write)` into IR1 semantic operations.
 
+---
+
+---
+
+# Chat - https://share.gemini.google/e3X7VFgdYL99 - Calendar End-of-Month & 2D Slices
+
+### Summary of Changes
+
+- **Inline View Resolution (`lowering.py`, `workspace.py`)**:
+    - Implemented `_find_view_definition` in `SemanticLoweringPass` to inspect inline `VIEW OF <DDM>` blocks declared in `DEFINE DATA`.
+    - Mapped inline views directly to their backing DDM models (`MYVIEW` -> `Employees`), resolving unqualified view field references without leaking `_UNRESOLVED` fallbacks.
+
+- **Primary Key Lookups (`GET <VIEW> *ISN`)**:
+    - Added `EntityGetOp` to IR1 models and exported it via `natural.ir`.
+    - Lowered `GetStatement` to `session.get(<Model>, record.id)`.
+    - Scoped entity references in `PythonEmitter` so secondary views accessed via `GET` resolve to their respective record handles (`myview2_record.<col>`) rather than colliding with the active query loop iterator.
+
+- **2D Adabas Array Slicing & Subscripts (`expression_parser.py`, `python_emitter.py`)**:
+    - Enhanced `ExpressionTransformer.var_with_bracket` to detect dot-separated 2D array coordinates (`occurrence.element` or `occurrence.start:end`).
+    - Separated scalar substring write semantics from array bounds slicing.
+    - Aligned array ranges with Natural 1-based inclusive upper bounds, lowering `(start:end)` to Python `[start - 1:end]` instead of relative length offset addition (`[s:s + len]`).
+
+- **Dynamic Tabulation Width Calculations (`python_emitter.py`)**:
+    - Replaced compile-time string evaluation in `WriteOp` emission with dynamic runtime length subtraction (`34 - len("    " + str(...))`), preventing syntax-literal length leakage into emitted code.
+
+- **Declaration Initializers (`INIT <val>`)**:
+    - Propagated `DataField.init_val` through `Symbol.init_val` in `lowering.py`.
+    - Generated typed initialization expressions in `Context.__init__` for integers, decimals, booleans, and dates (`*DATX`, `D'...'`).
+
+- **Testing & Tooling**:
+    - Added `tests/fixtures/calendar_sample.test` covering end-to-end multi-file compilation, 2D array indexing, and database sync.
+    - Added `.get()` implementation to `MockSession` in `tests/test_fixtures.py` and `emit_main_block`.
+    - Re-generated build targets across `workspaces/calendar-end-of-month`.
+
 
 * **Semantic Lowering (`src/natural/normalizer/lowering.py`)**:
 * Lowered `WriteStatement` and `PrintStatement` into `WriteOp`, converting tabulation targets and newline indicators into semantic expressions.

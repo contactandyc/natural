@@ -11,6 +11,7 @@ symbols:
       storage: date
     redefine_offset: 0
     is_array: false
+    init_val: '*DATX'
   '#DATEA':
     id: sym.local.datea
     name: '#DATEA'
@@ -136,3 +137,10 @@ operations:
       op: literal
       value: 1
   rounded: false
+- op: write
+  operands:
+  - op: literal
+    value: 'EOM:'
+  - op: ref
+    symbol_id: sym.local.date
+  is_write: false

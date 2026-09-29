@@ -81,6 +81,9 @@ from .pass1_models import (
     RepeatBlock,
     SubroutineBlock,
 )
+from .semantic import (
+    EntityGetOp,
+)
 from .serializer import serialize_to_yaml
 
 __all__ = [
@@ -108,6 +111,7 @@ __all__ = [
     "DefineDataBlock",
     "DeleteStatement",
     "EndTransactionStatement",
+    "EntityGetOp",
     "EscapeStatement",
     "ExamineStatement",
     "Expression",

@@ -27,6 +27,7 @@ class Symbol(BaseModel):
     redefine_parent: Optional[str] = None
     redefine_offset: int = 0
     is_array: bool = False
+    init_val: Optional[Any] = None
 
 
 class SemanticNode(BaseModel):
@@ -148,6 +149,14 @@ class EntityRefreshOp(SemanticStatement):
     op: str = "entity_refresh"
     target_loop_id: Optional[str] = None
     entity: Optional[str] = None
+
+
+class EntityGetOp(SemanticStatement):
+    op: str = "entity_get"
+    target_var: str
+    entity: str
+    natural_view: str
+    key_expr: SemanticExpression
 
 
 class TerminateOp(SemanticStatement):

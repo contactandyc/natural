@@ -135,6 +135,42 @@ class ExpressionTransformer(Transformer):
         raw_content = str(tokens[1]).strip() if len(tokens) > 1 and tokens[1] is not None else ""
         sub_parser = _get_expr_parser()
 
+        if var_name.upper().startswith(("F#", "FN#", "UDF#")):
+            arg_strs = _split_args(raw_content) if raw_content else []
+            args = [sub_parser.parse(a) for a in arg_strs]
+            return Expression(
+                kind="func_call",
+                func_name=var_name,
+                func_args=args,
+            )
+
+        if "." in raw_content:
+            dim_parts = raw_content.split(".", 1)
+            left_dim = dim_parts[0].strip()
+            right_dim = dim_parts[1].strip()
+
+            occ_expr = sub_parser.parse(left_dim)
+
+            if ":" in right_dim:
+                slice_parts = right_dim.split(":", 1)
+                p1 = sub_parser.parse(slice_parts[0].strip()) if slice_parts[0].strip() else Expression(kind="literal", value=1)
+                p2 = sub_parser.parse(slice_parts[1].strip()) if slice_parts[1].strip() else None
+                return Expression(
+                    kind="ref",
+                    value=var_name,
+                    array_dim=raw_content,
+                    array_indices=[occ_expr],
+                    substring=SubstringSpec(start=p1, length=p2),
+                )
+            else:
+                elem_expr = sub_parser.parse(right_dim)
+                return Expression(
+                    kind="ref",
+                    value=var_name,
+                    array_dim=raw_content,
+                    array_indices=[occ_expr, elem_expr],
+                )
+
         if ":" in raw_content:
             parts = raw_content.split(":", 1)
             left_part = parts[0].strip()
@@ -147,21 +183,10 @@ class ExpressionTransformer(Transformer):
                 substring=SubstringSpec(start=p1, length=p2),
             )
 
-        if var_name.upper().startswith(("F#", "FN#", "UDF#")):
-            arg_strs = _split_args(raw_content) if raw_content else []
-            args = [sub_parser.parse(a) for a in arg_strs]
-            return Expression(
-                kind="func_call",
-                func_name=var_name,
-                func_args=args,
-            )
-
         if raw_content:
             if "," in raw_content:
                 idx_strs = _split_args(raw_content)
                 indices = [sub_parser.parse(a) for a in idx_strs]
-            elif re.match(r"^\d+\.\d+$", raw_content):
-                indices = [sub_parser.parse(p) for p in raw_content.split(".")]
             else:
                 indices = [sub_parser.parse(raw_content)]
             return Expression(kind="ref", value=var_name, array_dim=raw_content, array_indices=indices)

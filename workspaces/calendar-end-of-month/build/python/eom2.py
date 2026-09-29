@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 
 class Eom2Context:
     def __init__(self):
-        self.date = date.today()
+        self.date = datetime.strptime('01/28/2006', '%m/%d/%Y').date()
         self.t = ""
         self.d = date.today()
 
@@ -28,6 +28,7 @@ def execute_eom2(ctx: Eom2Context, session):
         if (ctx.dd == 1):
             break
     ctx.d = (ctx.d - timedelta(days=1))
+    print('EOM:', ctx.date, ctx.d)
     return ctx
 
 if __name__ == "__main__":
@@ -55,10 +56,14 @@ if __name__ == "__main__":
             return self
         def group_by(self, *args, **kwargs):
             return self
+        def all(self):
+            return self
 
     class MockSession:
         def query(self, *args, **kwargs):
             return MockQuery()
+        def get(self, entity, ident):
+            return entity()
         def add(self, obj): pass
         def delete(self, obj): pass
         def flush(self): pass

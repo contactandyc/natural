@@ -11,10 +11,35 @@ symbols:
       storage: binary
     redefine_offset: 0
     is_array: false
+    init_val: '1'
+  MYVIEW.NAME:
+    id: sym.entity.myview.name
+    name: NAME
+    scope: entity_field
+    semantic_type:
+      base: string
+    redefine_offset: 0
+    is_array: false
+  MYVIEW.LANG:
+    id: sym.entity.myview.lang
+    name: LANG
+    scope: entity_field
+    semantic_type:
+      base: string
+    redefine_offset: 0
+    is_array: true
+  MYVIEW2.LANG:
+    id: sym.entity.myview2.lang
+    name: LANG
+    scope: entity_field
+    semantic_type:
+      base: string
+    redefine_offset: 0
+    is_array: true
 operations:
 - op: query_iteration
   id: loop.read_001
-  entity: MYVIEW
+  entity: EMPLOYEES
   natural_view: MYVIEW
   predicate:
     op: gte
@@ -26,8 +51,34 @@ operations:
       value: SMITH
   cardinality: many
   body:
+  - op: write
+    operands:
+    - op: tab
+      value: 5
+    - op: ref
+      symbol_id: sym.entity.myview.lang
+      substring:
+        start:
+          op: ref
+          symbol_id: sym.local.offset
+        length:
+          op: add
+          lhs:
+            op: ref
+            symbol_id: sym.local.offset
+          rhs:
+            op: literal
+            value: 5
+      array_indices:
+      - op: ref
+        symbol_id: sym.local.offset
+    - op: tab
+      value: 35
+    - op: literal
+      value: <== LANG (1:6) AFTER READ
+    is_write: true
   - op: assign
-    target_id: sym.unresolved.lang
+    target_id: sym.entity.myview.lang
     target_indices:
     - op: literal
       value: 1
@@ -43,9 +94,81 @@ operations:
       op: literal
       value: 2
     rounded: false
+  - op: write
+    operands:
+    - op: tab
+      value: 5
+    - op: ref
+      symbol_id: sym.entity.myview.lang
+      array_indices:
+      - op: literal
+        value: 1
+      - op: literal
+        value: 1
+    - op: tab
+      value: 35
+    - op: literal
+      value: <== LANG (1.1) AFTER TWO ASSIGNS
+    - op: newline
+      value: /
+    - op: tab
+      value: 5
+    - op: ref
+      symbol_id: sym.entity.myview.lang
+      substring:
+        start:
+          op: ref
+          symbol_id: sym.local.offset
+        length:
+          op: add
+          lhs:
+            op: ref
+            symbol_id: sym.local.offset
+          rhs:
+            op: literal
+            value: 4
+      array_indices:
+      - op: ref
+        symbol_id: sym.local.offset
+    - op: tab
+      value: 35
+    - op: literal
+      value: <== LANG (2:6) AFTER TWO ASSIGNS
+    is_write: true
   - op: entity_update
     target_loop_id: loop.read_001
-    entity: MYVIEW
+    entity: EMPLOYEES
+  - op: entity_get
+    target_var: myview2_record
+    entity: EMPLOYEES
+    natural_view: MYVIEW2
+    key_expr:
+      op: ref
+      symbol_id: sym.entity.active.id
+  - op: write
+    operands:
+    - op: tab
+      value: 5
+    - op: ref
+      symbol_id: sym.entity.myview2.lang
+      substring:
+        start:
+          op: literal
+          value: 1
+        length:
+          op: literal
+          value: 6
+    - op: tab
+      value: 35
+    - op: literal
+      value: <== AFTER UPDATE AND GET
+    - op: newline
+      value: /
+    - op: tab
+      value: 5
+    - op: literal
+      value: '-------------------------------------------------------'
+    is_write: true
   - op: assign
     target_id: sym.local.offset
     expr:

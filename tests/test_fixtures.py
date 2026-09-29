@@ -240,6 +240,9 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
         def query(self, *args, **kwargs):
             return MockQuery(self._records)
 
+        def get(self, entity, ident):
+            return self._records[0] if self._records else entity()
+
         def add(self, *args):
             pass
 

@@ -30,6 +30,7 @@ from natural.ir.models import (
     UpdateStatement,
     DeleteStatement,
     StoreStatement,
+    GetStatement,
     GetSameStatement,
     EndTransactionStatement,
     BackoutTransactionStatement,
@@ -47,6 +48,7 @@ from natural.ir.models import (
     OnErrorBlockStatement,
     PrintStatement,
     WriteStatement,
+    ViewDefinition,
 )
 from natural.ir.semantic import (
     SemanticModule,
@@ -73,6 +75,7 @@ from natural.ir.semantic import (
     FetchOp,
     TransactionOp,
     EntityRefreshOp,
+    EntityGetOp,
     TerminateOp,
     AtStartOfDataOp,
     AtEndOfDataOp,
@@ -122,6 +125,16 @@ class SemanticLoweringPass:
         self.loop_counter = 0
         self.active_function_name: Optional[str] = None
         self.function_symbols: Dict[str, Symbol] = {}
+
+    def _find_view_definition(self, view_name: Optional[str]) -> Optional[ViewDefinition]:
+        if not view_name:
+            return None
+        v_upper = view_name.upper()
+        for area in self.ast.data_areas:
+            for v in area.views:
+                if v.view_name.upper() == v_upper:
+                    return v
+        return None
 
     def parse_format(self, raw_fmt: str) -> SemanticType:
         if not raw_fmt:
@@ -203,6 +216,7 @@ class SemanticLoweringPass:
                     redefine_parent=parent_id,
                     redefine_offset=offset,
                     is_array=is_arr,
+                    init_val=field.init_val,
                 )
                 self.symbols[field.name] = sym
 
@@ -213,6 +227,35 @@ class SemanticLoweringPass:
                 if getattr(field, "group_name", None):
                     qualified_grp = f"{field.group_name}.{field.name}"
                     self.symbols[qualified_grp] = sym
+
+            for v_def in area.views:
+                v_name = v_def.view_name
+                v_clean = v_name.lower().replace("#", "")
+                ddm_name = v_def.ddm_name or v_name
+                ddm = self.workspace.get_ddm(ddm_name) if self.workspace else None
+                ddm_fields_by_name = {f.name.upper(): f for f in ddm.inline_fields} if ddm else {}
+
+                for vf in v_def.fields:
+                    f_name = vf.name
+                    f_clean = f_name.lower().replace("#", "")
+                    sym_id = f"sym.entity.{v_clean}.{f_clean}"
+
+                    matched_ddm_f = ddm_fields_by_name.get(f_name.upper())
+                    if matched_ddm_f and matched_ddm_f.format:
+                        sem_type = self.parse_format(matched_ddm_f.format.raw_spec)
+                        is_arr = bool(matched_ddm_f.array_dim or getattr(matched_ddm_f, "is_periodic", False) or getattr(matched_ddm_f, "is_multiple", False))
+                    else:
+                        sem_type = SemanticType(base="string")
+                        is_arr = bool(vf.array_dim)
+
+                    sym = Symbol(
+                        id=sym_id,
+                        name=f_name,
+                        scope="entity_field",
+                        semantic_type=sem_type,
+                        is_array=is_arr,
+                    )
+                    self.symbols[f"{v_name}.{f_name}"] = sym
 
     def resolve_ref(self, name: str) -> str:
         if self.active_function_name:
@@ -233,12 +276,25 @@ class SemanticLoweringPass:
                 return sym.id
 
         for ctx in reversed(self.loop_stack):
-            if ctx.view_name and self.workspace:
-                ddm = self.workspace.get_ddm(ctx.view_name)
-                if ddm:
-                    for f in ddm.inline_fields:
-                        if f.name.lower() == clean:
+            if ctx.view_name:
+                v_def = self._find_view_definition(ctx.view_name)
+                if v_def:
+                    for vf in v_def.fields:
+                        if vf.name.lower().replace("#", "") == clean:
                             return f"sym.entity.{ctx.view_name.lower()}.{clean}"
+                    if v_def.ddm_name and self.workspace:
+                        ddm = self.workspace.get_ddm(v_def.ddm_name)
+                        if ddm:
+                            for f in ddm.inline_fields:
+                                if f.name.lower().replace("#", "") == clean:
+                                    return f"sym.entity.{ctx.view_name.lower()}.{clean}"
+
+                if self.workspace:
+                    ddm = self.workspace.get_ddm(ctx.view_name)
+                    if ddm:
+                        for f in ddm.inline_fields:
+                            if f.name.lower() == clean:
+                                return f"sym.entity.{ctx.view_name.lower()}.{clean}"
 
         if "." in name:
             parts = name.split(".")
@@ -721,6 +777,20 @@ class SemanticLoweringPass:
                     matched_entity = ctx.entity
                     break
             return [EntityRefreshOp(target_loop_id=self._resolve_target_loop(None), entity=matched_entity)]
+        elif isinstance(stmt, GetStatement):
+            v_name = stmt.view_name.upper()
+            v_def = self._find_view_definition(v_name)
+            entity_name = (v_def.ddm_name if v_def and v_def.ddm_name else v_name).replace("-VIEW", "")
+            target_var = f"{v_name.lower()}_record"
+            key_expr = self.lower_expr(stmt.arguments[0]) if stmt.arguments else SemanticExpression(op="ref", symbol_id="sym.entity.active.id")
+            return [
+                EntityGetOp(
+                    target_var=target_var,
+                    entity=entity_name,
+                    natural_view=v_name,
+                    key_expr=key_expr,
+                )
+            ]
         elif isinstance(stmt, AtStartOfDataStatement):
             return [AtStartOfDataOp(body=self.lower_statements(stmt.body))]
         elif isinstance(stmt, AtEndOfDataStatement):
@@ -957,13 +1027,20 @@ class SemanticLoweringPass:
             self.loop_counter += 1
             op_name = "find" if isinstance(stmt, FindStatement) else "read"
             loop_id = f"loop.{op_name}_{self.loop_counter:03d}"
-            entity_name = stmt.view_name.replace("-VIEW", "")
+
+            v_def = self._find_view_definition(stmt.view_name)
+            if v_def and v_def.ddm_name:
+                entity_name = v_def.ddm_name.replace("-VIEW", "")
+            else:
+                entity_name = stmt.view_name.replace("-VIEW", "")
+
             self.loop_stack.append(
                 ActiveLoopContext(loop_id=loop_id, label=stmt.label, entity=entity_name, view_name=stmt.view_name)
             )
 
+            lookup_ddm_name = (v_def.ddm_name if v_def and v_def.ddm_name else stmt.view_name)
             if self.workspace:
-                ddm = self.workspace.get_ddm(stmt.view_name)
+                ddm = self.workspace.get_ddm(lookup_ddm_name)
                 if ddm:
                     for field in ddm.inline_fields:
                         clean_name = field.name.lower()

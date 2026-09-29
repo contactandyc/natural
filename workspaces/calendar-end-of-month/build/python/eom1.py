@@ -42,6 +42,7 @@ def execute_eom1(ctx: Eom1Context, session):
     ctx.dd = 1
     ctx.date = datetime.strptime(ctx.datea, '%Y%m%d').date()
     ctx.date = (ctx.date - timedelta(days=1))
+    print('EOM:', ctx.date)
     return ctx
 
 if __name__ == "__main__":
@@ -66,10 +67,14 @@ if __name__ == "__main__":
             return self
         def group_by(self, *args, **kwargs):
             return self
+        def all(self):
+            return self
 
     class MockSession:
         def query(self, *args, **kwargs):
             return MockQuery()
+        def get(self, entity, ident):
+            return entity()
         def add(self, obj): pass
         def delete(self, obj): pass
         def flush(self): pass

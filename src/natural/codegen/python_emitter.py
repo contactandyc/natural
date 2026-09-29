@@ -3,7 +3,7 @@
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
 from decimal import Decimal, ROUND_HALF_UP
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional, Set, Tuple
 from natural.ir.semantic import (
     SemanticModule,
     Symbol,
@@ -27,6 +27,7 @@ from natural.ir.semantic import (
     FetchOp,
     TransactionOp,
     EntityRefreshOp,
+    EntityGetOp,
     TerminateOp,
     AtStartOfDataOp,
     AtEndOfDataOp,
@@ -50,6 +51,7 @@ class PythonEmitter:
         self.indent_level = 0
         self.lines: List[str] = []
         self._sym_by_id: Dict[str, Symbol] = {s.id: s for s in module.symbols.values()}
+        self.current_loop_views: List[str] = []
 
     def _clean_name(self, name: str) -> str:
         clean = name.split(".")[-1].replace("#", "").replace("-", "_").lower()
@@ -82,9 +84,21 @@ class PythonEmitter:
             return f"ctx.{self._clean_name(parts[-1])}"
         elif len(parts) >= 3 and parts[1] == "entity":
             col_name = self._clean_name(parts[-1])
+            view_or_entity = self._clean_name(parts[2]) if len(parts) >= 4 else ""
+
+            is_active_loop = (
+                    view_or_entity in ("active", "")
+                    or (bool(self.current_loop_views) and view_or_entity in self.current_loop_views)
+            )
+
             if model_class:
-                return f"{model_class}.{col_name}"
-            return f"record.{col_name}"
+                if is_active_loop:
+                    return f"{model_class}.{col_name}"
+                return f"{view_or_entity}_record.{col_name}"
+
+            if is_active_loop:
+                return f"record.{col_name}"
+            return f"{view_or_entity}_record.{col_name}"
         elif len(parts) >= 3 and parts[1] == "unresolved":
             return f"ctx.{self._clean_name(parts[-1])}_UNRESOLVED"
         return symbol_id
@@ -110,8 +124,11 @@ class PythonEmitter:
                 start_val = self.emit_expr(expr.substring.start, model_class=model_class)
                 s_idx = f"({start_val} - 1)"
                 if expr.substring.length:
-                    len_val = self.emit_expr(expr.substring.length, model_class=model_class)
-                    return f"{base_ref}[{s_idx}:{s_idx} + {len_val}]"
+                    end_val = self.emit_expr(expr.substring.length, model_class=model_class)
+                    # If array_indices is present, it's an array bound (start:end), not a string (start:len)
+                    if getattr(expr, "array_indices", None):
+                        return f"{base_ref}[{s_idx}:{end_val}]"
+                    return f"{base_ref}[{s_idx}:{s_idx} + {end_val}]"
                 return f"{base_ref}[{s_idx}:]"
             return base_ref
         elif expr.op == "func_call":
@@ -251,37 +268,44 @@ class PythonEmitter:
                     self.emit_line(f"print({', '.join(parts)})")
                 else:
                     code_parts = []
-                    sim_parts = []
+                    sim_parts: List[Tuple[str, str]] = []
+
                     for e in line_ops:
                         if e.op == "tab":
                             target_col = max(0, int(e.value) - 1)
                             if not sim_parts:
                                 if target_col > 0:
                                     code_parts.append(f'" " * {target_col}')
-                                    sim_parts.append(" " * target_col)
+                                    sim_parts.append(("literal", " " * target_col))
                             else:
-                                if all(isinstance(p, str) for p in sim_parts):
-                                    sim_str = "".join(sim_parts)
+                                if all(kind == "literal" for kind, _ in sim_parts):
+                                    sim_str = "".join(val for _, val in sim_parts)
                                     code_parts.append(f'" " * ({target_col} - len("{sim_str}"))')
                                     curr_len = len(sim_str)
                                     diff = max(0, target_col - curr_len)
-                                    sim_parts.append(" " * diff)
+                                    sim_parts.append(("literal", " " * diff))
                                 else:
-                                    sim_expr = " + ".join(sim_parts)
+                                    len_terms = []
+                                    for kind, val in sim_parts:
+                                        if kind == "literal":
+                                            len_terms.append(f'"{val}"')
+                                        else:
+                                            len_terms.append(val)
+                                    sim_expr = " + ".join(len_terms)
                                     code_parts.append(f'" " * ({target_col} - len({sim_expr}))')
-                                    sim_parts.append(f'" " * max(0, {target_col} - len({sim_expr}))')
+                                    sim_parts.append(("expr", f'" " * max(0, {target_col} - len({sim_expr}))'))
                         else:
                             if e.op == "literal" and isinstance(e.value, str):
                                 code_parts.append(f'"{e.value}"')
-                                sim_parts.append(e.value)
+                                sim_parts.append(("literal", e.value))
                             elif e.op == "literal":
                                 val_str = str(e.value)
                                 code_parts.append(repr(e.value))
-                                sim_parts.append(val_str)
+                                sim_parts.append(("literal", val_str))
                             else:
                                 expr_code = self.emit_expr(e)
                                 code_parts.append(f"str({expr_code})")
-                                sim_parts.append(f"str({expr_code})")
+                                sim_parts.append(("expr", f"str({expr_code})"))
 
                     line_code = " + ".join(code_parts)
                     self.emit_line(f"print({line_code})")
@@ -472,6 +496,12 @@ class PythonEmitter:
         elif isinstance(op, EntityRefreshOp):
             self.emit_line("session.refresh(record)")
 
+        elif isinstance(op, EntityGetOp):
+            model_name = self._clean_name(op.entity).title().replace("_", "")
+            target_var = self._clean_name(op.target_var)
+            key_expr = self.emit_expr(op.key_expr)
+            self.emit_line(f"{target_var} = session.get({model_name}, {key_expr})")
+
         elif isinstance(op, TerminateOp):
             self.emit_line("sys.exit(0)")
 
@@ -648,6 +678,12 @@ class PythonEmitter:
             model_name = self._clean_name(op.entity).title().replace("_", "")
             limit_clause = f".limit({op.limit})" if getattr(op, "limit", None) else ""
 
+            old_loop_views = self.current_loop_views
+            self.current_loop_views = [
+                self._clean_name(op.natural_view),
+                self._clean_name(op.entity),
+            ]
+
             if getattr(op, "cardinality", "") == "histogram":
                 col_name = self._clean_name(op.descriptor or "id")
                 cond = self.emit_expr(op.predicate, model_class=model_name)
@@ -662,6 +698,7 @@ class PythonEmitter:
                 for sub_op in op.body:
                     self.emit_operation(sub_op)
                 self.indent_level -= 1
+                self.current_loop_views = old_loop_views
                 return
 
             cond = self.emit_expr(op.predicate, model_class=model_name)
@@ -685,6 +722,7 @@ class PythonEmitter:
                 self.emit_line(f"_prev_{clean_f} = {field_ref}")
 
             self.indent_level -= 1
+            self.current_loop_views = old_loop_views
 
     def emit_main_block(self, class_name: str, func_name: str):
         self.emit_line("")
@@ -750,6 +788,10 @@ class PythonEmitter:
         self.emit_line("def group_by(self, *args, **kwargs):")
         self.indent_level += 1
         self.emit_line("return self")
+        self.indent_level -= 1
+        self.emit_line("def all(self):")
+        self.indent_level += 1
+        self.emit_line("return self")
         self.indent_level -= 2
         self.emit_line("")
         self.emit_line("class MockSession:")
@@ -757,6 +799,10 @@ class PythonEmitter:
         self.emit_line("def query(self, *args, **kwargs):")
         self.indent_level += 1
         self.emit_line("return MockQuery()")
+        self.indent_level -= 1
+        self.emit_line("def get(self, entity, ident):")
+        self.indent_level += 1
+        self.emit_line("return entity()")
         self.indent_level -= 1
         self.emit_line("def add(self, obj): pass")
         self.emit_line("def delete(self, obj): pass")
@@ -852,6 +898,8 @@ class PythonEmitter:
                             needs_datetime = True
                 if hasattr(op, "expr"):
                     scan_expr(op.expr)
+                if hasattr(op, "key_expr"):
+                    scan_expr(op.key_expr)
                 if hasattr(op, "condition"):
                     scan_expr(op.condition)
                 if hasattr(op, "operands"):
@@ -936,7 +984,7 @@ class PythonEmitter:
                         ctx_name = self._to_pascal_case(op.program_name) + "Context"
                         callnat_imports[prog].add(ctx_name)
                         callnat_imports[prog].add(f"execute_{prog}")
-                elif isinstance(op, (QueryIterationOp, EntityStoreOp)):
+                elif isinstance(op, (QueryIterationOp, EntityStoreOp, EntityGetOp)):
                     orm_models.add(self._clean_name(op.entity).title().replace("_", ""))
                     if getattr(op, "cardinality", "") == "histogram":
                         needs_func = True
@@ -993,15 +1041,34 @@ class PythonEmitter:
         self.indent_level += 1
         for sym in independent_syms:
             py_name = self._clean_name(sym.name)
+            base = sym.semantic_type.base
             if getattr(sym, "is_array", False):
                 default = "[]"
-            elif sym.semantic_type.base == "decimal":
+            elif sym.init_val is not None:
+                val = str(sym.init_val).strip()
+                if base == "integer":
+                    default = str(int(val)) if val.lstrip("-+").isdigit() else "0"
+                elif base == "decimal":
+                    default = f"Decimal('{val}')"
+                elif base == "boolean":
+                    default = str(val.upper() in ("TRUE", "1", "YES", "T"))
+                elif base == "date":
+                    if val.upper() in ("*DATX", "*DATN"):
+                        default = "date.today()"
+                    elif val.startswith("D'") and val.endswith("'"):
+                        date_str = val[2:-1].strip()
+                        default = f"datetime.strptime('{date_str}', '%m/%d/%Y').date()"
+                    else:
+                        default = "date.today()"
+                else:
+                    default = repr(val.strip("'\""))
+            elif base == "decimal":
                 default = "Decimal('0')"
-            elif sym.semantic_type.base == "date":
+            elif base == "date":
                 default = "date.today()"
-            elif sym.semantic_type.base == "integer":
+            elif base == "integer":
                 default = "0"
-            elif sym.semantic_type.base == "boolean":
+            elif base == "boolean":
                 default = "False"
             else:
                 default = '""'
