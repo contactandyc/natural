@@ -1,0 +1,69 @@
+=== NATURAL: EMPLOYEES.ddm ===
+1 AC NAME                                A   20  N N
+1 AD DEPT                                A    4  N N
+1 AE SALARY                              P  7.2  N N
+1 AF AGE                                 I    4  N N
+
+=== NATURAL: MOVE_BY_NAME.nsp ===
+DEFINE DATA
+PARAMETER
+1 #EMP-REC
+  2 NAME   (A20)
+  2 DEPT   (A4)
+  2 SALARY (P7.2)
+  2 CITY   (A15)
+1 #PROCESSED (I4)
+END-DEFINE
+FIND (1) EMPLOYEES WITH NAME = #EMP-REC.NAME
+  MOVE BY NAME EMPLOYEES TO #EMP-REC
+  #EMP-REC.CITY := 'NEW YORK'
+  #EMP-REC.DEPT := 'MKT'
+  MOVE BY NAME #EMP-REC TO EMPLOYEES
+  #PROCESSED := #PROCESSED + 1
+END-FIND
+
+=== PYTHON: move_by_name.py ===
+from decimal import Decimal
+from target_orm import Employees
+
+class MoveByNameContext:
+    def __init__(self):
+        self.emp_rec = ""
+        self.name = ""
+        self.dept = ""
+        self.salary = Decimal('0')
+        self.city = ""
+        self.processed = 0
+
+def execute_move_by_name(ctx: MoveByNameContext, session):
+    for loop_idx, record in enumerate(session.query(Employees).filter((Employees.name == ctx.name)).limit(1), 1):
+        loop_counter = loop_idx
+        ctx.name = record.name
+        ctx.dept = record.dept
+        ctx.salary = record.salary
+        ctx.city = 'NEW YORK'
+        ctx.dept = 'MKT'
+        record.name = ctx.name
+        record.dept = ctx.dept
+        record.salary = ctx.salary
+        ctx.processed = (ctx.processed + 1)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    name: "ALICE"
+    city: ""
+    dept: ""
+    salary: "0.00"
+    processed: 0
+  records:
+    - name: "ALICE"
+      dept: "ENG"
+      salary: "85000.00"
+      age: 30
+  expected:
+    name: "ALICE"
+    dept: "MKT"
+    salary: "85000.00"
+    city: "NEW YORK"
+    processed: 1

@@ -99,6 +99,11 @@ class ProjectBuilder:
                             self.dependency_graph[module_name].add(stmt.view_name.upper())
                         elif stmt_type == "CALLNAT":
                             self.dependency_graph[module_name].add(stmt.subprogram_name.upper())
+                        elif stmt_type == "MOVE_BY_NAME":
+                            for cand in (stmt.source.upper(), stmt.target.upper()):
+                                clean_cand = cand.replace("#", "")
+                                if clean_cand in self.file_map:
+                                    self.dependency_graph[module_name].add(clean_cand)
                 except Exception as e:
                     console.print(f"[yellow]Warning: Could not extract dependencies for {module_name}: {e}[/yellow]")
 

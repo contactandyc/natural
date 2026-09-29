@@ -43,6 +43,7 @@ class DataBlockParser:
         current_area: DataAreaRef | None = None
         current_scope = ScopeType.LOCAL
         current_redefine_target: str | None = None
+        current_group: str | None = None
         current_view: ViewDefinition | None = None
 
         clean_text = re.sub(r"/\*.*?(?:\*/|$)", "", raw_content, flags=re.MULTILINE)
@@ -55,6 +56,8 @@ class DataBlockParser:
                 current_area = DataAreaRef(name=f"INLINE_{current_scope.value}", scope=current_scope)
                 areas.append(current_area)
                 current_view = None
+                current_redefine_target = None
+                current_group = None
                 continue
 
             using_match = self.using_pattern.match(line)
@@ -62,6 +65,8 @@ class DataBlockParser:
                 scope_str, name = using_match.groups()
                 areas.append(DataAreaRef(name=name.upper(), scope=ScopeType(scope_str.upper())))
                 current_view = None
+                current_redefine_target = None
+                current_group = None
                 continue
 
             if not current_area:
@@ -76,6 +81,7 @@ class DataBlockParser:
                 current_view = ViewDefinition(level=level, view_name=view_name, ddm_name=ddm_name, fields=[])
                 current_area.views.append(current_view)
                 current_redefine_target = None
+                current_group = None
                 continue
 
             if current_view and line.startswith("02"):
@@ -91,6 +97,7 @@ class DataBlockParser:
                 level = int(redef_match.group(1))
                 target = redef_match.group(2)
                 current_redefine_target = target
+                current_group = None
                 current_area.redefines.append(RedefineDefinition(level=level, target_name=target))
                 current_view = None
                 continue
@@ -105,6 +112,10 @@ class DataBlockParser:
                 if level == 1:
                     current_redefine_target = None
                     current_view = None
+                    if not raw_format:
+                        current_group = name
+                    else:
+                        current_group = None
 
                 fmt = self._parse_format(raw_format.strip()) if raw_format else None
 
@@ -113,7 +124,8 @@ class DataBlockParser:
                     name=name,
                     format=fmt,
                     init_val=init_val.strip() if init_val else None,
-                    parent_name=current_redefine_target if level > 1 else None,
+                    parent_name=current_redefine_target if (level > 1 and current_redefine_target) else None,
+                    group_name=current_group if (level > 1 and not current_redefine_target) else None,
                 )
                 current_area.inline_fields.append(field)
 

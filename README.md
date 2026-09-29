@@ -671,3 +671,11 @@ Run the test suite to execute in-memory compilation and dynamic validation again
 ./build.sh run build workspaces/freight-calc --diff
 
 ```
+
+
+---
+
+# Chat - https://share.gemini.google/PNTS3MoUGtHd
+
+Make "MOVE BY NAME" work
+

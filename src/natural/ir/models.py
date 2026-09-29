@@ -27,6 +27,7 @@ class DataField(BaseModel):
     format: Optional[FieldFormat] = None
     direction: Optional[str] = None
     parent_name: Optional[str] = None
+    group_name: Optional[str] = None
     array_dim: Optional[str] = None
     init_val: Optional[Any] = None
     sub_fields: List[Any] = Field(default_factory=list)
@@ -205,6 +206,12 @@ class MoveStatement(Statement):
     target: Expression
     edit_mask: Optional[str] = None
     is_move_all: bool = False
+
+
+class MoveByNameStatement(Statement):
+    statement_type: str = "MOVE_BY_NAME"
+    source: str
+    target: str
 
 
 class CompressStatement(Statement):

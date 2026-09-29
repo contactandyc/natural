@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from natural.ir.models import (
     NaturalModule,
     AssignStatement,
@@ -16,6 +16,7 @@ from natural.ir.models import (
     LoopStatement,
     ForStatement,
     MoveStatement,
+    MoveByNameStatement,
     CompressStatement,
     SeparateStatement,
     ExamineStatement,
@@ -180,6 +181,10 @@ class SemanticLoweringPass:
                     qualified = f"{field.parent_name}.{field.name}"
                     self.symbols[qualified] = sym
 
+                if getattr(field, "group_name", None):
+                    qualified_grp = f"{field.group_name}.{field.name}"
+                    self.symbols[qualified_grp] = sym
+
     def resolve_ref(self, name: str) -> str:
         if name in self.symbols:
             return self.symbols[name].id
@@ -204,6 +209,140 @@ class SemanticLoweringPass:
             return f"sym.entity.{v_name.lower()}.{f_name.lower().replace('#', '')}"
 
         return f"sym.unresolved.{name.lower().replace('#', '').replace('.', '_')}"
+
+    def _get_fields_for_scope(self, scope_name: str) -> List[Tuple[str, str, str]]:
+        raw_name = scope_name.upper().strip()
+        clean_name = raw_name.replace("#", "").replace("-", "_")
+        results: List[Tuple[str, str, str]] = []
+        seen_norms = set()
+
+        def add_field(orig_name: str, sym_id: str):
+            norm = orig_name.lower().replace("#", "").replace("-", "_").split(".")[-1]
+            if norm not in seen_norms:
+                seen_norms.add(norm)
+                results.append((norm, sym_id, orig_name))
+
+        # 1. Match against active query loop scopes
+        matched_loop_ctx = None
+        for ctx in reversed(self.loop_stack):
+            v_name = ctx.view_name.upper() if ctx.view_name else ""
+            v_clean = v_name.replace("#", "").replace("-", "_")
+            v_no_view = v_clean.replace("_VIEW", "")
+            e_name = ctx.entity.upper() if ctx.entity else ""
+            e_clean = e_name.replace("#", "").replace("-", "_")
+
+            if raw_name in (v_name, e_name) or clean_name in (v_clean, v_no_view, e_clean):
+                matched_loop_ctx = ctx
+                break
+
+        if matched_loop_ctx and matched_loop_ctx.view_name:
+            view_n = matched_loop_ctx.view_name
+            if self.workspace:
+                ddm = self.workspace.get_ddm(view_n)
+                if not ddm and view_n.endswith("-VIEW"):
+                    ddm = self.workspace.get_ddm(view_n[:-5])
+                if not ddm:
+                    ddm = self.workspace.get_ddm(f"{view_n}-VIEW")
+                if ddm:
+                    for f in ddm.inline_fields:
+                        clean_col = f.name.lower().replace("#", "")
+                        sym_id = f"sym.entity.{view_n.lower()}.{clean_col}"
+                        add_field(f.name, sym_id)
+
+            if not results:
+                for area in self.ast.data_areas:
+                    for v in area.views:
+                        if v.view_name.upper() == view_n.upper():
+                            for f in v.fields:
+                                clean_col = f.name.lower().replace("#", "")
+                                sym_id = f"sym.entity.{view_n.lower()}.{clean_col}"
+                                add_field(f.name, sym_id)
+
+            if results:
+                return results
+
+        # 2. Match against workspace DDMs
+        if self.workspace:
+            ddm = self.workspace.get_ddm(raw_name)
+            if not ddm and not raw_name.endswith("-VIEW"):
+                ddm = self.workspace.get_ddm(f"{raw_name}-VIEW")
+            if not ddm and raw_name.endswith("-VIEW"):
+                ddm = self.workspace.get_ddm(raw_name[:-5])
+            if ddm:
+                for f in ddm.inline_fields:
+                    clean_col = f.name.lower().replace("#", "")
+                    sym_id = f"sym.entity.{ddm.name.lower()}.{clean_col}"
+                    add_field(f.name, sym_id)
+                if results:
+                    return results
+
+        # 3. Match against group records defined inside data areas
+        for area in self.ast.data_areas:
+            fields = list(area.inline_fields)
+            if not fields and self.workspace:
+                ext_area = self.workspace.get_data_area(area.name, area.scope)
+                if ext_area:
+                    fields = ext_area.inline_fields
+
+            in_group = False
+            for f in fields:
+                f_raw = f.name.upper()
+                f_clean = f_raw.replace("#", "").replace("-", "_")
+
+                if getattr(f, "group_name", None):
+                    grp_raw = f.group_name.upper()
+                    grp_clean = grp_raw.replace("#", "").replace("-", "_")
+                    if raw_name == grp_raw or clean_name == grp_clean:
+                        clean_col = f.name.lower().replace("#", "")
+                        sym_id = f"sym.{area.scope.value.lower()}.{clean_col}"
+                        add_field(f.name, sym_id)
+                elif f.level == 1:
+                    if f_raw == raw_name or f_clean == clean_name:
+                        in_group = True
+                    else:
+                        in_group = False
+                elif in_group and f.level > 1:
+                    clean_col = f.name.lower().replace("#", "")
+                    sym_id = f"sym.{area.scope.value.lower()}.{clean_col}"
+                    add_field(f.name, sym_id)
+
+            if results:
+                return results
+
+        # 4. Match against entire data area by name
+        for area in self.ast.data_areas:
+            area_raw = area.name.upper()
+            area_clean = area_raw.replace("#", "").replace("-", "_")
+            if raw_name == area_raw or clean_name == area_clean:
+                fields = list(area.inline_fields)
+                if not fields and self.workspace:
+                    ext_area = self.workspace.get_data_area(area.name, area.scope)
+                    if ext_area:
+                        fields = ext_area.inline_fields
+                for f in fields:
+                    if f.format:
+                        clean_col = f.name.lower().replace("#", "")
+                        sym_id = f"sym.{area.scope.value.lower()}.{clean_col}"
+                        add_field(f.name, sym_id)
+                if results:
+                    return results
+
+        # 5. Match against workspace external data areas
+        if self.workspace:
+            data_area = self.workspace.get_data_area(raw_name, scope=None)
+            if not data_area and (raw_name.startswith("#") or clean_name != raw_name):
+                data_area = self.workspace.get_data_area(clean_name, scope=None)
+            if data_area:
+                scope_str = data_area.scope.value.lower() if data_area.scope else "local"
+                for f in data_area.inline_fields:
+                    if f.format:
+                        clean_col = f.name.lower().replace("#", "")
+                        sym_id = f"sym.{scope_str}.{clean_col}"
+                        add_field(f.name, sym_id)
+                if results:
+                    return results
+
+        return results
 
     def lower_expr(self, expr: Expression) -> SemanticExpression:
         if expr.kind == "ref" and str(expr.value).startswith("*"):
@@ -335,6 +474,24 @@ class SemanticLoweringPass:
                     rounded=stmt.rounded,
                 )
             ]
+        elif isinstance(stmt, MoveByNameStatement):
+            source_fields = self._get_fields_for_scope(stmt.source)
+            target_fields = self._get_fields_for_scope(stmt.target)
+
+            target_map = {norm: (sym_id, orig_name) for norm, sym_id, orig_name in target_fields}
+            assign_ops = []
+
+            for norm, src_sym_id, _ in source_fields:
+                if norm in target_map:
+                    tgt_sym_id, _ = target_map[norm]
+                    assign_ops.append(
+                        AssignOp(
+                            target_id=tgt_sym_id,
+                            expr=SemanticExpression(op="ref", symbol_id=src_sym_id),
+                        )
+                    )
+
+            return assign_ops
         elif isinstance(stmt, MoveStatement):
             target_str = str(stmt.target.value) if hasattr(stmt.target, "value") else str(stmt.target)
             target_id = self.resolve_ref(target_str)
