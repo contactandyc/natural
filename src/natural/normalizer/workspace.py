@@ -38,7 +38,6 @@ class Workspace:
         if not content:
             return None
 
-        # Wrap raw field lines if missing the DEFINE DATA block
         if "DEFINE DATA" not in content.upper():
             scope_keyword = scope.value if scope else "LOCAL"
             content = f"DEFINE DATA\n{scope_keyword} USING {name}\nLOCAL\n{content}\nEND-DEFINE\nEND"
@@ -113,9 +112,32 @@ class Workspace:
             return None
 
         fields = []
+        pe_pattern = re.compile(r'^\s*(\d+)\s+(PE|GR)\s+([A-Z0-9\-]+)(?:\s*\(([0-9\:]+)\))?.*$', re.IGNORECASE)
         pattern = re.compile(r'^\s*(\d+)\s+([A-Z0-9]{2})\s+([A-Z0-9\-]+)\s+([A-Z])\s+([\d\.]+)(.*)$')
 
+        current_pe_group: Optional[str] = None
+
         for line in content.splitlines():
+            pe_match = pe_pattern.match(line)
+            if pe_match:
+                level = int(pe_match.group(1))
+                fname = pe_match.group(3)
+                dim_spec = pe_match.group(4) or "1"
+                max_idx = int(dim_spec.split(":")[-1]) if dim_spec else 1
+
+                if level == 1:
+                    current_pe_group = fname
+
+                fields.append(DataField(
+                    level=level,
+                    name=fname,
+                    format=FieldFormat(kind="periodic_group", raw_spec="PE"),
+                    is_periodic=True,
+                    array_dim=str(max_idx),
+                    max_index=max_idx,
+                ))
+                continue
+
             match = pattern.match(line)
             if match:
                 level = int(match.group(1))
@@ -125,6 +147,9 @@ class Workspace:
                 raw_spec = f"{kind_char}{match.group(5)}"
                 remainder = match.group(6)
 
+                if level == 1:
+                    current_pe_group = None
+
                 kind_map = {
                     "A": "alphanumeric", "P": "packed_decimal",
                     "N": "numeric", "I": "integer",
@@ -133,15 +158,33 @@ class Workspace:
                 kind = kind_map.get(kind_char, "unknown")
 
                 sub_fields = []
+                array_dim = None
+                max_index = 1
+                is_multiple = False
+
                 if "(" in remainder:
                     raw_subs = re.findall(r'([A-Za-z0-9\-_]+)\s*\(\s*(\d+)\s*:\s*(\d+)\s*\)', remainder)
-                    for s_name, s_start, s_end in raw_subs:
-                        sub_fields.append((s_name, int(s_start), int(s_end)))
+                    if raw_subs:
+                        for s_name, s_start, s_end in raw_subs:
+                            sub_fields.append((s_name, int(s_start), int(s_end)))
+                    else:
+                        range_m = re.search(r'\(\s*(?:\d+\s*:\s*)?(\d+)\s*\)', remainder)
+                        if range_m:
+                            max_index = int(range_m.group(1))
+                            array_dim = str(max_index)
+                            is_multiple = True
+
+                parent_name = current_pe_group if (level > 1 and current_pe_group) else None
 
                 fields.append(DataField(
-                    level=level, name=fname,
+                    level=level,
+                    name=fname,
                     format=FieldFormat(kind=kind, raw_spec=raw_spec),
                     sub_fields=sub_fields,
+                    array_dim=array_dim,
+                    max_index=max_index,
+                    is_multiple=is_multiple,
+                    parent_name=parent_name,
                 ))
 
         if fields:

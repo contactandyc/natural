@@ -10,6 +10,7 @@ symbols:
       length: 4
       storage: alphanumeric
     redefine_offset: 0
+    is_array: false
   '#ROUTE-ZONE':
     id: sym.parameter.route-zone
     name: '#ROUTE-ZONE'
@@ -19,6 +20,7 @@ symbols:
       length: 6
       storage: alphanumeric
     redefine_offset: 0
+    is_array: false
   '#SHIP-WEIGHT':
     id: sym.parameter.ship-weight
     name: '#SHIP-WEIGHT'
@@ -29,6 +31,7 @@ symbols:
       scale: 2
       storage: packed_decimal
     redefine_offset: 0
+    is_array: false
   '#FINAL-CHARGE':
     id: sym.parameter.final-charge
     name: '#FINAL-CHARGE'
@@ -39,6 +42,7 @@ symbols:
       scale: 2
       storage: packed_decimal
     redefine_offset: 0
+    is_array: false
   '#BASE-CHARGE':
     id: sym.local.base-charge
     name: '#BASE-CHARGE'
@@ -49,6 +53,7 @@ symbols:
       scale: 2
       storage: packed_decimal
     redefine_offset: 0
+    is_array: false
   '#SURCHARGE':
     id: sym.local.surcharge
     name: '#SURCHARGE'
@@ -59,6 +64,7 @@ symbols:
       scale: 2
       storage: packed_decimal
     redefine_offset: 0
+    is_array: false
   CLASS:
     id: sym.entity.tariff-view.class
     name: CLASS
@@ -68,6 +74,7 @@ symbols:
       length: 4
       storage: alphanumeric
     redefine_offset: 0
+    is_array: false
   ZONE:
     id: sym.entity.tariff-view.zone
     name: ZONE
@@ -77,6 +84,7 @@ symbols:
       length: 6
       storage: alphanumeric
     redefine_offset: 0
+    is_array: false
   RATE:
     id: sym.entity.tariff-view.rate
     name: RATE
@@ -87,6 +95,7 @@ symbols:
       scale: 2
       storage: packed_decimal
     redefine_offset: 0
+    is_array: false
   WEIGHT-LIMIT:
     id: sym.entity.tariff-view.weight-limit
     name: WEIGHT-LIMIT
@@ -97,6 +106,7 @@ symbols:
       scale: 2
       storage: packed_decimal
     redefine_offset: 0
+    is_array: false
   HEAVY-SURCHARGE:
     id: sym.entity.tariff-view.heavy-surcharge
     name: HEAVY-SURCHARGE
@@ -107,6 +117,7 @@ symbols:
       scale: 2
       storage: packed_decimal
     redefine_offset: 0
+    is_array: false
 operations:
 - op: query_iteration
   id: loop.find_001
@@ -115,12 +126,13 @@ operations:
   predicate:
     op: eq
     lhs:
-      op: entity_field
+      op: ref
       symbol_id: sym.entity.tariff-view.class
     rhs:
       op: ref
       symbol_id: sym.parameter.ship-class
-  cardinality: many
+  limit: 1
+  cardinality: one
   body:
   - op: assign
     target_id: sym.local.base-charge

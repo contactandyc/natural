@@ -1,0 +1,60 @@
+=== NATURAL: EMPLOYEES.ddm ===
+1 AC NAME                                A   20  N N
+1 AB LANG                                A    2  N (1:3)
+1 AE BONUS                               P  7.2  N (1:3)
+
+=== NATURAL: ADABAS_PERIODIC_GROUP.nsp ===
+DEFINE DATA
+PARAMETER
+1 #NAME (A20)
+1 #FIRST_LANG (A2)
+1 #SECOND_LANG (A2)
+1 #THIRD_LANG (A2)
+1 #OFFSET (I4)
+END-DEFINE
+FIND (1) EMPLOYEES WITH NAME = #NAME
+  #FIRST_LANG := LANG(1)
+  LANG(2) := 'ES'
+  #SECOND_LANG := LANG(2)
+  #OFFSET := 3
+  LANG(#OFFSET) := 'FR'
+  #THIRD_LANG := LANG(3)
+END-FIND
+
+=== PYTHON: adabas_periodic_group.py ===
+from target_orm import Employees
+
+class AdabasPeriodicGroupContext:
+    def __init__(self):
+        self.name = ""
+        self.first_lang = ""
+        self.second_lang = ""
+        self.third_lang = ""
+        self.offset = 0
+
+def execute_adabas_periodic_group(ctx: AdabasPeriodicGroupContext, session):
+    for loop_idx, record in enumerate(session.query(Employees).filter((Employees.name == ctx.name)).limit(1), 1):
+        loop_counter = loop_idx
+        ctx.first_lang = record.lang[0]
+        record.lang[1] = 'ES'
+        ctx.second_lang = record.lang[1]
+        ctx.offset = 3
+        record.lang[(ctx.offset - 1)] = 'FR'
+        ctx.third_lang = record.lang[2]
+    return ctx
+
+=== EXECUTE ===
+- input:
+    name: "ALICE"
+    first_lang: ""
+    second_lang: ""
+    third_lang: ""
+    offset: 0
+  records:
+    - name: "ALICE"
+      lang: ["EN", "DE", "IT"]
+      bonus: [100.0, 200.0, 300.0]
+  expected:
+    first_lang: "EN"
+    second_lang: "ES"
+    third_lang: "FR"

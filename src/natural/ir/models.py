@@ -21,6 +21,8 @@ class FieldFormat(BaseModel):
     decimals: Optional[int] = None
 
 
+# In src/natural/ir/models.py around line 33:
+
 class DataField(BaseModel):
     level: int = 1
     name: str
@@ -29,6 +31,9 @@ class DataField(BaseModel):
     parent_name: Optional[str] = None
     group_name: Optional[str] = None
     array_dim: Optional[str] = None
+    max_index: int = 1
+    is_periodic: bool = False
+    is_multiple: bool = False
     init_val: Optional[Any] = None
     sub_fields: List[Any] = Field(default_factory=list)
 

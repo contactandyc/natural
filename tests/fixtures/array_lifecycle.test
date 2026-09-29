@@ -1,0 +1,60 @@
+=== NATURAL ===
+DEFINE DATA
+PARAMETER
+1 #ELEM1 (A10)
+1 #ELEM2 (A10)
+1 #FINAL_SZ (I4)
+LOCAL
+1 #ARR (A10/*)
+1 #SZ (I4)
+END-DEFINE
+#SZ := 3
+EXPAND ARRAY #ARR TO (1:#SZ)
+#ARR(1) := 'ALPHA'
+#ARR(2) := 'BETA'
+#ARR(3) := 'GAMMA'
+#SZ := 5
+EXPAND ARRAY #ARR TO (1:#SZ)
+#ARR(4) := 'DELTA'
+#SZ := 2
+REDUCE ARRAY #ARR TO (1:#SZ)
+#ELEM1 := #ARR(1)
+#ELEM2 := #ARR(2)
+#FINAL_SZ := *OCC(#ARR)
+
+=== PYTHON ===
+class ArrayLifecycleContext:
+    def __init__(self):
+        self.elem1 = ""
+        self.elem2 = ""
+        self.final_sz = 0
+        self.arr = []
+        self.sz = 0
+
+def execute_array_lifecycle(ctx: ArrayLifecycleContext, session):
+    ctx.sz = 3
+    _diff = max(0, int(ctx.sz) - len(ctx.arr))
+    ctx.arr.extend([None] * _diff)
+    ctx.arr[0] = 'ALPHA'
+    ctx.arr[1] = 'BETA'
+    ctx.arr[2] = 'GAMMA'
+    ctx.sz = 5
+    _diff = max(0, int(ctx.sz) - len(ctx.arr))
+    ctx.arr.extend([None] * _diff)
+    ctx.arr[3] = 'DELTA'
+    ctx.sz = 2
+    del ctx.arr[int(ctx.sz):]
+    ctx.elem1 = ctx.arr[0]
+    ctx.elem2 = ctx.arr[1]
+    ctx.final_sz = len(ctx.arr)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    elem1: ""
+    elem2: ""
+    final_sz: 0
+  expected:
+    elem1: "ALPHA"
+    elem2: "BETA"
+    final_sz: 2

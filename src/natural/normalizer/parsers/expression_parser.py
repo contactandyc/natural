@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
+import re
 from decimal import Decimal
 from typing import List
 from lark import Lark, Transformer
@@ -54,7 +55,7 @@ expr_grammar = r"""
     NUMBER.2: /-?\d+(\.\d+)?/
     STRING: /'[^']*'/ | /"[^"]*"/
     DATE_LITERAL: /D'[^']+'/
-    SYSTEM_VAR.2: /\*[A-Z0-9\-_]+(?:\([A-Za-z0-9\-_.]+\))?/
+    SYSTEM_VAR.2: /\*[A-Z0-9\-_]+(?:\([*#\+A-Za-z0-9\-_. ]+\))?/
     VAR_NAME: /[*#\+][A-Za-z0-9\-_#]+((\.|\/)[A-Za-z0-9\-_#]+)*/ | /[A-Za-z][A-Za-z0-9\-_#]*((\.|\/)[A-Za-z0-9\-_#]+)*/
 
     %import common.WS
@@ -93,6 +94,16 @@ def _split_args(content: str) -> List[str]:
     return args
 
 
+_cached_expr_parser = None
+
+
+def _get_expr_parser():
+    global _cached_expr_parser
+    if _cached_expr_parser is None:
+        _cached_expr_parser = ExpressionParser()
+    return _cached_expr_parser
+
+
 class ExpressionTransformer(Transformer):
     def num_lit(self, tokens):
         val = str(tokens[0])
@@ -122,27 +133,40 @@ class ExpressionTransformer(Transformer):
     def var_with_bracket(self, tokens):
         var_name = str(tokens[0])
         raw_content = str(tokens[1]).strip() if len(tokens) > 1 and tokens[1] is not None else ""
+        sub_parser = _get_expr_parser()
 
         if ":" in raw_content:
             parts = raw_content.split(":", 1)
-            p1 = ExpressionParser().parse(parts[0].strip())
-            p2 = ExpressionParser().parse(parts[1].strip())
+            left_part = parts[0].strip()
+            right_part = parts[1].strip()
+            p1 = sub_parser.parse(left_part) if left_part else Expression(kind="literal", value=1)
+            p2 = sub_parser.parse(right_part) if right_part else None
             return Expression(
                 kind="ref",
                 value=var_name,
                 substring=SubstringSpec(start=p1, length=p2),
             )
 
-        if var_name.upper().startswith(("F#", "FN#", "UDF#")) or "," in raw_content:
+        if var_name.upper().startswith(("F#", "FN#", "UDF#")):
             arg_strs = _split_args(raw_content) if raw_content else []
-            args = [ExpressionParser().parse(a) for a in arg_strs]
+            args = [sub_parser.parse(a) for a in arg_strs]
             return Expression(
                 kind="func_call",
                 func_name=var_name,
                 func_args=args,
             )
 
-        return Expression(kind="ref", value=var_name, array_dim=raw_content)
+        if raw_content:
+            if "," in raw_content:
+                idx_strs = _split_args(raw_content)
+                indices = [sub_parser.parse(a) for a in idx_strs]
+            elif re.match(r"^\d+\.\d+$", raw_content):
+                indices = [sub_parser.parse(p) for p in raw_content.split(".")]
+            else:
+                indices = [sub_parser.parse(raw_content)]
+            return Expression(kind="ref", value=var_name, array_dim=raw_content, array_indices=indices)
+
+        return Expression(kind="ref", value=var_name)
 
     def substring_expr(self, tokens):
         clause_tokens = tokens[0]

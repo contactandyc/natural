@@ -132,6 +132,8 @@ class SemanticLoweringPass:
             return SemanticType(base="decimal", precision=prec, scale=scale, storage=storage)
         elif kind == "A":
             clean_len = raw_fmt[1:].replace("DYNAMIC", "").strip()
+            if "/" in clean_len:
+                clean_len = clean_len.split("/", 1)[0].strip()
             length = int(clean_len) if clean_len.isdigit() else 0
             return SemanticType(base="string", length=length, storage="alphanumeric")
         elif kind == "D":
@@ -187,6 +189,8 @@ class SemanticLoweringPass:
                     offset = redefine_offsets.get(parent_id, 0)
                     redefine_offsets[parent_id] = offset + self._field_length(sem_type)
 
+                is_arr = bool(field.array_dim or getattr(field, "is_periodic", False) or getattr(field, "is_multiple", False))
+
                 sym = Symbol(
                     id=sym_id,
                     name=field.name,
@@ -194,6 +198,7 @@ class SemanticLoweringPass:
                     semantic_type=sem_type,
                     redefine_parent=parent_id,
                     redefine_offset=offset,
+                    is_array=is_arr,
                 )
                 self.symbols[field.name] = sym
 
@@ -401,7 +406,18 @@ class SemanticLoweringPass:
             return SemanticExpression(op="literal", value=expr.value)
         elif expr.kind == "sys_var":
             var_name = str(expr.value).upper()
-            if var_name.startswith("*COUNTER"):
+            if var_name.startswith("*OCC"):
+                m = re.search(r"\*OCC\(\s*([*#\+A-Za-z0-9\-_\.]+)", var_name)
+                if m:
+                    arr_name = m.group(1).strip()
+                    arr_id = self.resolve_ref(arr_name)
+                    return SemanticExpression(
+                        op="func_call",
+                        symbol_id="len",
+                        items=[SemanticExpression(op="ref", symbol_id=arr_id)],
+                    )
+                return SemanticExpression(op="literal", value=0)
+            elif var_name.startswith("*COUNTER"):
                 return SemanticExpression(op="counter", value="loop_counter")
             elif var_name.startswith("*ISN"):
                 return SemanticExpression(op="ref", symbol_id="sym.entity.active.id")
@@ -718,7 +734,7 @@ class SemanticLoweringPass:
         elif isinstance(stmt, ResizeArrayStatement):
             target_id = self.resolve_ref(stmt.array_name)
             size_op = self.lower_expr(stmt.dimensions[0]) if stmt.dimensions else SemanticExpression(op="literal", value=0)
-            return [ResizeArrayOp(target_id=target_id, size=size_op)]
+            return [ResizeArrayOp(target_id=target_id, action=stmt.action, size=size_op)]
         elif isinstance(stmt, OnErrorBlockStatement):
             return [OnErrorOp(body=self.lower_statements(stmt.body))]
         elif isinstance(stmt, UpdateStatement):
@@ -871,11 +887,13 @@ class SemanticLoweringPass:
                         clean_name = field.name.lower()
                         sym_id = f"sym.entity.{stmt.view_name.lower()}.{clean_name}"
                         raw_spec = field.format.raw_spec if field.format else "A"
+                        is_arr = bool(field.array_dim or getattr(field, "is_periodic", False) or getattr(field, "is_multiple", False))
                         self.symbols[field.name] = Symbol(
                             id=sym_id,
                             name=field.name,
                             scope="entity_field",
                             semantic_type=self.parse_format(raw_spec),
+                            is_array=is_arr,
                         )
 
             sym_field = f"sym.entity.{stmt.view_name.lower()}.{stmt.descriptor.lower()}"
@@ -927,11 +945,13 @@ class SemanticLoweringPass:
                         clean_name = field.name.lower()
                         sym_id = f"sym.entity.{stmt.view_name.lower()}.{clean_name}"
                         raw_spec = field.format.raw_spec if field.format else "A"
+                        is_arr = bool(field.array_dim or getattr(field, "is_periodic", False) or getattr(field, "is_multiple", False))
                         self.symbols[field.name] = Symbol(
                             id=sym_id,
                             name=field.name,
                             scope="entity_field",
                             semantic_type=self.parse_format(raw_spec),
+                            is_array=is_arr,
                         )
 
             limit_val = getattr(stmt, "limit", None)
@@ -1024,11 +1044,13 @@ class SemanticLoweringPass:
             clean_p = p.name.lower().replace("#", "")
             sym_id = f"fn.{fn_name.lower()}.{clean_p}"
             raw_spec = p.format.raw_spec if p.format else "A"
+            is_arr = bool(p.array_dim or getattr(p, "is_periodic", False) or getattr(p, "is_multiple", False))
             sym = Symbol(
                 id=sym_id,
                 name=p.name,
                 scope="parameter",
                 semantic_type=self.parse_format(raw_spec),
+                is_array=is_arr,
             )
             self.function_symbols[p.name] = sym
             param_symbols.append(sym)

@@ -13,6 +13,9 @@ data_areas:
       length: 9
       digits: 9
       decimals: 2
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
   - level: 1
     name: '#SURCHARGE'
     format:
@@ -21,6 +24,9 @@ data_areas:
       length: 7
       digits: 7
       decimals: 2
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
 body:
 - statement_type: FIND
   view_name: TARIFF-VIEW
@@ -28,6 +34,16 @@ body:
   operand:
     kind: ref
     value: '#SHIP-CLASS'
+  criteria:
+    kind: binary_op
+    operator: '='
+    left:
+      kind: ref
+      value: CLASS
+    right:
+      kind: ref
+      value: '#SHIP-CLASS'
+  limit: 1
   body:
   - statement_type: ASSIGN
     target:

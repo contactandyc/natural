@@ -18,7 +18,7 @@ from natural.ir.models import (
 class DataBlockParser:
     def __init__(self):
         self.field_pattern = re.compile(
-            r"^\s*(\d{1,2})\s+([*#\+A-Za-z0-9\-_]+)(?:\s*\(([^)]+)\))?(?:\s+DYNAMIC)?(?:\s+INIT\s*<?([^>]+)?>?)?\s*$",
+            r"^\s*(\d{1,2})\s+([*#\+A-Za-z0-9\-_]+)(?:\s*\(([^)]+)\))?(?:\s*\(([^)]+)\))?(?:\s+DYNAMIC)?(?:\s+INIT\s*<?([^>]+)?>?)?\s*$",
             re.IGNORECASE,
         )
         self.redefine_pattern = re.compile(
@@ -46,7 +46,7 @@ class DataBlockParser:
         current_group: str | None = None
         current_view: ViewDefinition | None = None
 
-        clean_text = re.sub(r"/\*.*?(?:\*/|$)", "", raw_content, flags=re.MULTILINE)
+        clean_text = re.sub(r"/\*(?!\s*\)).*?(?:\*/|$)", "", raw_content, flags=re.MULTILINE)
         clean_text = re.sub(r"(?<=[^\n])\s+(\d{1,2}\s+(?:REDEFINE|[#*A-Za-z]))", r"\n\1", clean_text)
         lines = [line.strip() for line in clean_text.splitlines() if line.strip() and not line.strip().startswith("*")]
 
@@ -107,7 +107,8 @@ class DataBlockParser:
                 level = int(field_match.group(1))
                 name = field_match.group(2)
                 raw_format = field_match.group(3)
-                init_val = field_match.group(4)
+                second_paren = field_match.group(4)
+                init_val = field_match.group(5)
 
                 if level == 1:
                     current_redefine_target = None
@@ -117,12 +118,23 @@ class DataBlockParser:
                     else:
                         current_group = None
 
+                array_dim = None
+                if second_paren:
+                    array_dim = second_paren.strip()
+                elif raw_format and "/" in raw_format:
+                    fmt_part, dim_part = raw_format.split("/", 1)
+                    raw_format = fmt_part.strip()
+                    array_dim = dim_part.strip()
+                elif "DYNAMIC" in line.upper() and not array_dim:
+                    array_dim = "*"
+
                 fmt = self._parse_format(raw_format.strip()) if raw_format else None
 
                 field = DataField(
                     level=level,
                     name=name,
                     format=fmt,
+                    array_dim=array_dim,
                     init_val=init_val.strip() if init_val else None,
                     parent_name=current_redefine_target if (level > 1 and current_redefine_target) else None,
                     group_name=current_group if (level > 1 and not current_redefine_target) else None,
@@ -136,6 +148,9 @@ class DataBlockParser:
             return FieldFormat(kind="unknown", raw_spec="")
 
         clean_spec = raw_fmt.upper().replace("DYNAMIC", "").strip()
+        if "/" in clean_spec:
+            clean_spec = clean_spec.split("/", 1)[0].strip()
+
         kind_char = clean_spec[0] if clean_spec else "A"
         kind_map = {
             "A": "alphanumeric",

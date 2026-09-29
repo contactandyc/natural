@@ -49,8 +49,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Standalone runner for execute_eom1")
-    parser.add_argument("--date", type=str, default=None, help="Initial value for date")
-    parser.add_argument("--datea", type=str, default=None, help="Initial value for datea")
+    parser.add_argument("--date", dest="date", type=str, default=None, help="Initial value for date")
+    parser.add_argument("--datea", dest="datea", type=str, default=None, help="Initial value for datea")
     args = parser.parse_args()
     ctx = Eom1Context()
 
@@ -64,14 +64,18 @@ if __name__ == "__main__":
             return self
         def limit(self, *args, **kwargs):
             return self
+        def group_by(self, *args, **kwargs):
+            return self
 
     class MockSession:
         def query(self, *args, **kwargs):
             return MockQuery()
         def add(self, obj): pass
         def delete(self, obj): pass
-        def flush(self):
-            pass
+        def flush(self): pass
+        def commit(self): pass
+        def rollback(self): pass
+        def refresh(self, obj): pass
 
     session = MockSession()
     result = execute_eom1(ctx, session)

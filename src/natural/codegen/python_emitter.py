@@ -7,6 +7,7 @@ from typing import List, Dict, Optional, Set
 from natural.ir.semantic import (
     SemanticModule,
     Symbol,
+    SemanticType,
     AssignOp,
     BranchOp,
     LoopOp,
@@ -99,17 +100,24 @@ class PythonEmitter:
             base_ref = self._resolve_ref(expr.symbol_id, model_class=model_class)
             if getattr(expr, "array_indices", None):
                 for idx in expr.array_indices:
-                    idx_val = self.emit_expr(idx, model_class=model_class)
-                    base_ref = f"{base_ref}[({idx_val} - 1)]"
+                    if idx.op == "literal" and isinstance(idx.value, int):
+                        base_ref = f"{base_ref}[{idx.value - 1}]"
+                    else:
+                        idx_val = self.emit_expr(idx, model_class=model_class)
+                        base_ref = f"{base_ref}[({idx_val} - 1)]"
             if expr.substring:
                 start_val = self.emit_expr(expr.substring.start, model_class=model_class)
+                s_idx = f"({start_val} - 1)"
                 if expr.substring.length:
                     len_val = self.emit_expr(expr.substring.length, model_class=model_class)
-                    return f"{base_ref}[({start_val} - 1):({start_val} - 1) + {len_val}]"
-                return f"{base_ref}[({start_val} - 1):]"
+                    return f"{base_ref}[{s_idx}:{s_idx} + {len_val}]"
+                return f"{base_ref}[{s_idx}:]"
             return base_ref
         elif expr.op == "func_call":
-            fn_name = self._clean_func_name(expr.symbol_id or "func")
+            if expr.symbol_id in ("len", "max", "min", "abs", "int", "str"):
+                fn_name = expr.symbol_id
+            else:
+                fn_name = self._clean_func_name(expr.symbol_id or "func")
             args_str = ", ".join(self.emit_expr(it, model_class=model_class) for it in expr.items)
             return f"{fn_name}({args_str})"
         elif expr.op == "tuple":
@@ -224,8 +232,11 @@ class PythonEmitter:
             target = self._resolve_ref(op.target_id)
             if getattr(op, "target_indices", None):
                 for idx in op.target_indices:
-                    idx_val = self.emit_expr(idx)
-                    target = f"{target}[({idx_val} - 1)]"
+                    if idx.op == "literal" and isinstance(idx.value, int):
+                        target = f"{target}[{idx.value - 1}]"
+                    else:
+                        idx_val = self.emit_expr(idx)
+                        target = f"{target}[({idx_val} - 1)]"
 
             target_sym = self._sym_by_id.get(op.target_id)
             source_sym = self._sym_by_id.get(op.expr.symbol_id) if op.expr.symbol_id else None
@@ -233,13 +244,13 @@ class PythonEmitter:
             if op.target_substring:
                 start_val = self.emit_expr(op.target_substring.start)
                 s_idx = f"({start_val} - 1)"
+                rhs_val = f"str({self.emit_expr(op.expr)})"
                 if op.target_substring.length:
                     len_val = self.emit_expr(op.target_substring.length)
                     e_idx = f"({s_idx} + {len_val})"
+                    self.emit_line(f"{target} = {target}[:{s_idx}] + {rhs_val} + {target}[{e_idx}:]")
                 else:
-                    e_idx = "None"
-                rhs_val = f"str({self.emit_expr(op.expr)})"
-                self.emit_line(f"{target} = {target}[:{s_idx}] + {rhs_val} + ({target}[{e_idx}:] if {e_idx} is not None else '')")
+                    self.emit_line(f"{target} = {target}[:{s_idx}] + {rhs_val}")
                 return
 
             if op.edit_mask and target_sym and source_sym:
@@ -442,7 +453,21 @@ class PythonEmitter:
         elif isinstance(op, ResizeArrayOp):
             target = self._resolve_ref(op.target_id)
             size = self.emit_expr(op.size)
-            self.emit_line(f"{target} = [None] * int({size})")
+            if op.action == "EXPAND":
+                self.emit_line(f"_diff = max(0, int({size}) - len({target}))")
+                self.emit_line(f"{target}.extend([None] * _diff)")
+            elif op.action == "REDUCE":
+                self.emit_line(f"del {target}[int({size}):]")
+            else:
+                self.emit_line(f"if int({size}) < len({target}):")
+                self.indent_level += 1
+                self.emit_line(f"del {target}[int({size}):]")
+                self.indent_level -= 1
+                self.emit_line("else:")
+                self.indent_level += 1
+                self.emit_line(f"_diff = max(0, int({size}) - len({target}))")
+                self.emit_line(f"{target}.extend([None] * _diff)")
+                self.indent_level -= 1
 
         elif isinstance(op, EntityUpdateOp):
             self.emit_line("session.flush()  # UPDATE committed for active loop")
@@ -639,7 +664,9 @@ class PythonEmitter:
             base_type = sym.semantic_type.base
             self.emit_line(f"if args.{py_name} is not None:")
             self.indent_level += 1
-            if base_type == "date":
+            if getattr(sym, "is_array", False):
+                self.emit_line(f"ctx.{py_name} = args.{py_name}.split(',')")
+            elif base_type == "date":
                 self.emit_line(f"ctx.{py_name} = date.fromisoformat(args.{py_name})")
             elif base_type == "decimal":
                 self.emit_line(f"ctx.{py_name} = Decimal(args.{py_name})")
@@ -876,7 +903,6 @@ class PythonEmitter:
         if import_lines or callnat_imports or orm_models or needs_func:
             self.emit_line("")
 
-        # Emit user-defined functions
         for fn_name, fn_block in self.module.functions.items():
             py_fn_name = self._clean_func_name(fn_name)
             params_list = [f"{self._clean_name(p.name)}: {self._type_to_python_hint(p.semantic_type)}" for p in fn_block.parameters]
@@ -905,7 +931,9 @@ class PythonEmitter:
         self.indent_level += 1
         for sym in independent_syms:
             py_name = self._clean_name(sym.name)
-            if sym.semantic_type.base == "decimal":
+            if getattr(sym, "is_array", False):
+                default = "[]"
+            elif sym.semantic_type.base == "decimal":
                 default = "Decimal('0')"
             elif sym.semantic_type.base == "date":
                 default = "date.today()"

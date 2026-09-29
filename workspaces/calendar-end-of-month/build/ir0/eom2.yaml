@@ -8,6 +8,9 @@ data_areas:
     format:
       kind: date
       raw_spec: D
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
     init_val: D'01/28/2006'
   - level: 1
     name: '#T'
@@ -16,6 +19,9 @@ data_areas:
       raw_spec: A8
       length: 8
       digits: 8
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
   - level: 2
     name: '#DD'
     format:
@@ -24,11 +30,17 @@ data_areas:
       length: 2
       digits: 2
     parent_name: '#T'
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
   - level: 1
     name: '#D'
     format:
       kind: date
       raw_spec: D
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
   redefines:
   - level: 1
     target_name: '#T'

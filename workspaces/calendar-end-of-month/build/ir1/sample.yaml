@@ -10,6 +10,7 @@ symbols:
       length: 2
       storage: binary
     redefine_offset: 0
+    is_array: false
 operations:
 - op: query_iteration
   id: loop.read_001
@@ -27,6 +28,11 @@ operations:
   body:
   - op: assign
     target_id: sym.unresolved.lang
+    target_indices:
+    - op: literal
+      value: 1
+    - op: literal
+      value: 1
     expr:
       op: literal
       value: '***'

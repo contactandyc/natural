@@ -11,7 +11,7 @@ class RatecalcContext:
         self.surcharge = Decimal('0')
 
 def execute_ratecalc(ctx: RatecalcContext, session):
-    for loop_idx, record in enumerate(session.query(Tariff).filter((Tariff.class_ == ctx.ship_class)), 1):
+    for loop_idx, record in enumerate(session.query(Tariff).filter((Tariff.class_ == ctx.ship_class)).limit(1), 1):
         loop_counter = loop_idx
         ctx.base_charge = (record.rate * ctx.ship_weight)
         if (ctx.ship_weight > record.weight_limit):
@@ -50,6 +50,8 @@ if __name__ == "__main__":
         def filter(self, *args, **kwargs):
             return self
         def limit(self, *args, **kwargs):
+            return self
+        def group_by(self, *args, **kwargs):
             return self
 
     class MockSession:

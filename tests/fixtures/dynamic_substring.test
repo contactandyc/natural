@@ -1,0 +1,47 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #SRC   (A20)
+1 #START (I4)
+1 #LEN   (I4)
+1 #SUB   (A20)
+1 #MOD   (A20)
+END-DEFINE
+#SUB := #SRC(#START:#LEN)
+#MOD := #SRC
+#MOD(#START:#LEN) := 'XYZ'
+
+=== PYTHON ===
+class DynamicSubstringContext:
+    def __init__(self):
+        self.src = ""
+        self.start = 0
+        self.len = 0
+        self.sub = ""
+        self.mod = ""
+
+def execute_dynamic_substring(ctx: DynamicSubstringContext, session):
+    ctx.sub = ctx.src[(ctx.start - 1):(ctx.start - 1) + ctx.len]
+    ctx.mod = ctx.src
+    ctx.mod = ctx.mod[:(ctx.start - 1)] + str('XYZ') + ctx.mod[((ctx.start - 1) + ctx.len):]
+    return ctx
+
+=== EXECUTE ===
+- input:
+    src: "ABCDEFGHIJ"
+    start: 1
+    len: 3
+    sub: ""
+    mod: ""
+  expected:
+    sub: "ABC"
+    mod: "XYZDEFGHIJ"
+
+- input:
+    src: "HELLO WORLD"
+    start: 7
+    len: 5
+    sub: ""
+    mod: ""
+  expected:
+    sub: "WORLD"
+    mod: "HELLO XYZ"

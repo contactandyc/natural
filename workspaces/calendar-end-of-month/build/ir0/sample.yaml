@@ -10,6 +10,9 @@ data_areas:
       raw_spec: I2
       length: 2
       digits: 2
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
     init_val: '1'
   views:
   - level: 1
@@ -59,6 +62,11 @@ body:
       kind: ref
       value: LANG
       array_dim: '1.1'
+      array_indices:
+      - kind: literal
+        value: 1
+      - kind: literal
+        value: 1
     value:
       kind: literal
       value: '***'
@@ -105,7 +113,7 @@ body:
   - statement_type: GET
     view_name: MYVIEW2
     arguments:
-    - kind: ref
+    - kind: sys_var
       value: '*ISN'
   - statement_type: WRITE
     items:

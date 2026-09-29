@@ -21,10 +21,12 @@ def execute_eom2(ctx: Eom2Context, session):
     ctx.t = ctx.date.strftime('%d%m%Y')
     if (ctx.dd < 28):
         ctx.dd = 28
-    while not ((ctx.dd == 1)):
+    while True:
         ctx.d = datetime.strptime(ctx.t, '%d%m%Y').date()
         ctx.d = (ctx.d + timedelta(days=1))
         ctx.t = ctx.d.strftime('%d%m%Y')
+        if (ctx.dd == 1):
+            break
     ctx.d = (ctx.d - timedelta(days=1))
     return ctx
 
@@ -33,9 +35,9 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Standalone runner for execute_eom2")
-    parser.add_argument("--date", type=str, default=None, help="Initial value for date")
-    parser.add_argument("--t", type=str, default=None, help="Initial value for t")
-    parser.add_argument("--d", type=str, default=None, help="Initial value for d")
+    parser.add_argument("--date", dest="date", type=str, default=None, help="Initial value for date")
+    parser.add_argument("--t", dest="t", type=str, default=None, help="Initial value for t")
+    parser.add_argument("--d", dest="d", type=str, default=None, help="Initial value for d")
     args = parser.parse_args()
     ctx = Eom2Context()
 
@@ -51,14 +53,18 @@ if __name__ == "__main__":
             return self
         def limit(self, *args, **kwargs):
             return self
+        def group_by(self, *args, **kwargs):
+            return self
 
     class MockSession:
         def query(self, *args, **kwargs):
             return MockQuery()
         def add(self, obj): pass
         def delete(self, obj): pass
-        def flush(self):
-            pass
+        def flush(self): pass
+        def commit(self): pass
+        def rollback(self): pass
+        def refresh(self, obj): pass
 
     session = MockSession()
     result = execute_eom2(ctx, session)

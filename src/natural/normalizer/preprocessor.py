@@ -16,7 +16,8 @@ class NaturalPreprocessor:
 
     def strip_comments(self, text: str) -> str:
         # Strip block / inline comments: /* ... */
-        cleaned = re.sub(r"/\*.*?(?:\*/|$)", "", text)
+        # Negative lookahead (?!\s*\)) ensures dynamic array dimensions like (A10/*) or (*) are not stripped
+        cleaned = re.sub(r"/\*(?!\s*\)).*?(?:\*/|$)", "", text)
         lines = []
         for line in cleaned.splitlines():
             stripped = line.strip()
@@ -32,7 +33,6 @@ class NaturalPreprocessor:
         i = 0
         while i < len(lines):
             line = lines[i]
-            # If line ends with '/' (Natural WRITE/PRINT line break) and next line is indented output
             while (
                     line.rstrip().endswith("/")
                     and i + 1 < len(lines)

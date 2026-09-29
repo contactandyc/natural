@@ -26,6 +26,7 @@ class Symbol(BaseModel):
     semantic_type: SemanticType
     redefine_parent: Optional[str] = None
     redefine_offset: int = 0
+    is_array: bool = False
 
 
 class SemanticNode(BaseModel):
@@ -45,6 +46,7 @@ class SemanticExpression(SemanticNode):
     rhs: Optional["SemanticExpression"] = None
     items: List["SemanticExpression"] = Field(default_factory=list)
     substring: Optional[SemanticSubstring] = None
+    array_indices: List["SemanticExpression"] = Field(default_factory=list)
 
 
 SemanticSubstring.model_rebuild()
@@ -173,6 +175,7 @@ class AtBreakOp(SemanticStatement):
 class ResizeArrayOp(SemanticStatement):
     op: str = "resize_array"
     target_id: str
+    action: str = "RESIZE"  # "EXPAND", "REDUCE", "RESIZE"
     size: SemanticExpression
 
 

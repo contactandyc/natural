@@ -8,6 +8,9 @@ data_areas:
     format:
       kind: date
       raw_spec: D
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
     init_val: '*DATX'
   - level: 1
     name: '#DATEA'
@@ -16,6 +19,9 @@ data_areas:
       raw_spec: A8
       length: 8
       digits: 8
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
   - level: 2
     name: YYYY
     format:
@@ -24,6 +30,9 @@ data_areas:
       length: 4
       digits: 4
     parent_name: '#DATEA'
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
   - level: 2
     name: MM
     format:
@@ -32,6 +41,9 @@ data_areas:
       length: 2
       digits: 2
     parent_name: '#DATEA'
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
   - level: 2
     name: DD
     format:
@@ -40,6 +52,9 @@ data_areas:
       length: 2
       digits: 2
     parent_name: '#DATEA'
+    max_index: 1
+    is_periodic: false
+    is_multiple: false
   redefines:
   - level: 1
     target_name: '#DATEA'
