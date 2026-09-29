@@ -1,0 +1,54 @@
+=== NATURAL: CALLER.nsp ===
+DEFINE DATA LOCAL
+1 #VAL (I4)
+1 #OUT (I4)
+END-DEFINE
+#VAL := 10
+#OUT := 0
+CALLNAT 'CALLEE' #VAL #OUT
+
+=== NATURAL: CALLEE.nsn ===
+DEFINE DATA PARAMETER
+1 #NUM (I4)
+1 #RES (I4)
+END-DEFINE
+#RES := #NUM * 2
+#NUM := #NUM + 1
+
+=== PYTHON: callee.py ===
+class CalleeContext:
+    def __init__(self):
+        self.num = 0
+        self.res = 0
+
+def execute_callee(ctx: CalleeContext, session):
+    ctx.res = (ctx.num * 2)
+    ctx.num = (ctx.num + 1)
+    return ctx
+
+=== PYTHON: caller.py ===
+from callee import CalleeContext, execute_callee
+
+class CallerContext:
+    def __init__(self):
+        self.val = 0
+        self.out = 0
+
+def execute_caller(ctx: CallerContext, session):
+    ctx.val = 10
+    ctx.out = 0
+    _callee_ctx = CalleeContext()
+    _callee_ctx.num = ctx.val
+    _callee_ctx.res = ctx.out
+    execute_callee(_callee_ctx, session)
+    ctx.val = _callee_ctx.num
+    ctx.out = _callee_ctx.res
+    return ctx
+
+=== EXECUTE ===
+- input:
+    val: 10
+    out: 0
+  expected:
+    val: 11
+    out: 20

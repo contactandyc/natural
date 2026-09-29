@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
+import re
 from typing import List, Dict, Optional, Tuple
 from natural.ir.models import (
     NaturalModule,
@@ -23,6 +24,8 @@ from natural.ir.models import (
     ResetStatement,
     PerformStatement,
     CallnatStatement,
+    FetchStatement,
+    FunctionDefinition,
     UpdateStatement,
     DeleteStatement,
     StoreStatement,
@@ -47,6 +50,7 @@ from natural.ir.semantic import (
     Symbol,
     SemanticType,
     SemanticSubstring,
+    CallArgBinding,
     AssignOp,
     BranchOp,
     LoopOp,
@@ -63,6 +67,7 @@ from natural.ir.semantic import (
     ResetOp,
     CallSubroutineOp,
     CallProgramOp,
+    FetchOp,
     TransactionOp,
     EntityRefreshOp,
     TerminateOp,
@@ -77,9 +82,22 @@ from natural.ir.semantic import (
     WriteWorkFileOp,
     CloseWorkFileOp,
     SubroutineBlockOp,
+    FunctionBlockOp,
     OnErrorOp,
 )
 from natural.normalizer.workspace import Workspace
+
+
+def _normalize_fn_name(name: str) -> str:
+    s = name.upper().replace("#", "_").replace("-", "_")
+    while s.startswith(("FN_", "F_", "UDF_")):
+        if s.startswith("FN_"):
+            s = s[3:]
+        elif s.startswith("F_"):
+            s = s[2:]
+        elif s.startswith("UDF_"):
+            s = s[4:]
+    return s.strip("_")
 
 
 class ActiveLoopContext:
@@ -98,6 +116,8 @@ class SemanticLoweringPass:
         self.symbols: Dict[str, Symbol] = {}
         self.loop_stack: List[ActiveLoopContext] = []
         self.loop_counter = 0
+        self.active_function_name: Optional[str] = None
+        self.function_symbols: Dict[str, Symbol] = {}
 
     def parse_format(self, raw_fmt: str) -> SemanticType:
         if not raw_fmt:
@@ -186,6 +206,14 @@ class SemanticLoweringPass:
                     self.symbols[qualified_grp] = sym
 
     def resolve_ref(self, name: str) -> str:
+        if self.active_function_name:
+            if name in self.function_symbols:
+                return self.function_symbols[name].id
+            clean_f = name.split(".")[-1].lower().replace("#", "")
+            for s in self.function_symbols.values():
+                if s.name.lower().replace("#", "") == clean_f:
+                    return s.id
+
         if name in self.symbols:
             return self.symbols[name].id
 
@@ -343,6 +371,15 @@ class SemanticLoweringPass:
         if expr.kind == "ref" and str(expr.value).startswith("*"):
             expr = Expression(kind="sys_var", value=expr.value)
 
+        if expr.kind == "func_call":
+            fn_name = expr.func_name or "unknown_func"
+            lowered_args = [self.lower_expr(arg) for arg in expr.func_args]
+            return SemanticExpression(
+                op="func_call",
+                symbol_id=fn_name,
+                items=lowered_args,
+            )
+
         if expr.kind == "ref":
             sub_op = None
             if expr.substring:
@@ -454,6 +491,11 @@ class SemanticLoweringPass:
     def lower_statement(self, stmt) -> list:
         if isinstance(stmt, AssignStatement):
             target_str = str(stmt.target.value) if hasattr(stmt.target, "value") else str(stmt.target)
+
+            if self.active_function_name:
+                if _normalize_fn_name(target_str) == _normalize_fn_name(self.active_function_name):
+                    return [ReturnOp(expr=self.lower_expr(stmt.value))]
+
             target_id = self.resolve_ref(target_str)
             target_sub = None
             if hasattr(stmt.target, "substring") and stmt.target.substring:
@@ -559,7 +601,73 @@ class SemanticLoweringPass:
             return [CallSubroutineOp(subroutine_name=stmt.subroutine_name)]
         elif isinstance(stmt, CallnatStatement):
             param_exprs = [self.lower_expr(p) for p in stmt.parameters]
-            return [CallProgramOp(program_name=stmt.subprogram_name, parameters=param_exprs)]
+            bindings: List[CallArgBinding] = []
+
+            formal_params = []
+            if self.workspace:
+                formal_params = self.workspace.get_subprogram_parameters(stmt.subprogram_name)
+
+            for idx, arg_stmt in enumerate(stmt.parameters):
+                lowered_arg = param_exprs[idx]
+                if idx < len(formal_params):
+                    callee_field_name = formal_params[idx].name.lower().replace("#", "")
+                else:
+                    callee_field_name = f"arg_{idx + 1}"
+
+                is_lval = (arg_stmt.kind == "ref")
+                target_id = self.resolve_ref(str(arg_stmt.value)) if is_lval else None
+
+                bindings.append(
+                    CallArgBinding(
+                        caller_expr=lowered_arg,
+                        callee_field=callee_field_name,
+                        is_lvalue=is_lval,
+                        caller_target_id=target_id,
+                    )
+                )
+
+            return [
+                CallProgramOp(
+                    program_name=stmt.subprogram_name,
+                    parameters=param_exprs,
+                    bindings=bindings,
+                )
+            ]
+        elif isinstance(stmt, FetchStatement):
+            param_exprs = [self.lower_expr(p) for p in stmt.parameters]
+            bindings: List[CallArgBinding] = []
+
+            formal_params = []
+            if self.workspace:
+                formal_params = self.workspace.get_subprogram_parameters(stmt.program_name)
+
+            for idx, arg_stmt in enumerate(stmt.parameters):
+                lowered_arg = param_exprs[idx]
+                if idx < len(formal_params):
+                    callee_field_name = formal_params[idx].name.lower().replace("#", "")
+                else:
+                    callee_field_name = f"arg_{idx + 1}"
+
+                is_lval = (arg_stmt.kind == "ref")
+                target_id = self.resolve_ref(str(arg_stmt.value)) if is_lval else None
+
+                bindings.append(
+                    CallArgBinding(
+                        caller_expr=lowered_arg,
+                        callee_field=callee_field_name,
+                        is_lvalue=is_lval,
+                        caller_target_id=target_id,
+                    )
+                )
+
+            return [
+                FetchOp(
+                    program_name=stmt.program_name,
+                    returning=stmt.returning,
+                    parameters=param_exprs,
+                    bindings=bindings,
+                )
+            ]
         elif isinstance(stmt, EndTransactionStatement):
             return [TransactionOp(action="commit")]
         elif isinstance(stmt, BackoutTransactionStatement):
@@ -898,6 +1006,45 @@ class SemanticLoweringPass:
             res.extend(self.lower_statement(s))
         return res
 
+    def lower_function(self, fn_name: str, fn_def: FunctionDefinition) -> FunctionBlockOp:
+        clean_raw_fmt = ""
+        if fn_def.returns_raw:
+            m = re.search(r"\(([^)]+)\)", fn_def.returns_raw)
+            clean_raw_fmt = m.group(1) if m else fn_def.returns_raw.replace("RETURNS", "").strip()
+        ret_type = self.parse_format(clean_raw_fmt)
+
+        saved_active = self.active_function_name
+        saved_func_syms = self.function_symbols
+
+        self.active_function_name = fn_name
+        self.function_symbols = {}
+
+        param_symbols: List[Symbol] = []
+        for p in fn_def.parameters:
+            clean_p = p.name.lower().replace("#", "")
+            sym_id = f"fn.{fn_name.lower()}.{clean_p}"
+            raw_spec = p.format.raw_spec if p.format else "A"
+            sym = Symbol(
+                id=sym_id,
+                name=p.name,
+                scope="parameter",
+                semantic_type=self.parse_format(raw_spec),
+            )
+            self.function_symbols[p.name] = sym
+            param_symbols.append(sym)
+
+        ops = self.lower_statements(fn_def.body)
+
+        self.active_function_name = saved_active
+        self.function_symbols = saved_func_syms
+
+        return FunctionBlockOp(
+            name=fn_name,
+            return_type=ret_type,
+            parameters=param_symbols,
+            operations=ops,
+        )
+
     def lower(self) -> SemanticModule:
         self.build_symbol_table()
         ops = self.lower_statements(self.ast.body)
@@ -906,9 +1053,14 @@ class SemanticLoweringPass:
         for sub_name, stmts in self.ast.subroutines.items():
             subs[sub_name] = SubroutineBlockOp(name=sub_name, operations=self.lower_statements(stmts))
 
+        funcs = {}
+        for fn_name, fn_def in self.ast.functions.items():
+            funcs[fn_name] = self.lower_function(fn_name, fn_def)
+
         return SemanticModule(
             module_id=f"mod.{self.ast.name.lower()}",
             symbols=self.symbols,
             operations=ops,
             subroutines=subs,
+            functions=funcs,
         )

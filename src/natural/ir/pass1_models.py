@@ -71,6 +71,12 @@ class SubroutineBlock(Pass1Node):
     body: List[Any] = Field(default_factory=list)
 
 
+class FunctionBlock(Pass1Node):
+    name: str
+    returns_clause: Optional[str] = None
+    body: List[Any] = Field(default_factory=list)
+
+
 class OnErrorBlock(Pass1Node):
     body: List[Any] = Field(default_factory=list)
 

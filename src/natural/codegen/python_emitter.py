@@ -23,6 +23,7 @@ from natural.ir.semantic import (
     ResetOp,
     CallSubroutineOp,
     CallProgramOp,
+    FetchOp,
     TransactionOp,
     EntityRefreshOp,
     TerminateOp,
@@ -37,6 +38,7 @@ from natural.ir.semantic import (
     WriteWorkFileOp,
     CloseWorkFileOp,
     OnErrorOp,
+    FunctionBlockOp,
 )
 
 
@@ -53,6 +55,17 @@ class PythonEmitter:
             return "class_"
         return clean
 
+    def _clean_func_name(self, name: str) -> str:
+        clean = name.replace("#", "_").replace("-", "_").lower()
+        while clean.startswith("fn_") or clean.startswith("f_") or clean.startswith("udf_"):
+            if clean.startswith("fn_"):
+                clean = clean[3:]
+            elif clean.startswith("f_"):
+                clean = clean[2:]
+            elif clean.startswith("udf_"):
+                clean = clean[4:]
+        return f"fn_{clean}"
+
     def _to_pascal_case(self, name: str) -> str:
         clean = name.split(".")[-1].replace("#", "").replace("-", "_").lower()
         return "".join(part.title() for part in clean.split("_") if part)
@@ -61,6 +74,8 @@ class PythonEmitter:
         if symbol_id.startswith("record."):
             return symbol_id
         parts = symbol_id.split(".")
+        if len(parts) >= 3 and parts[0] == "fn":
+            return self._clean_name(parts[-1])
         if len(parts) >= 3 and parts[1] in ("local", "parameter"):
             return f"ctx.{self._clean_name(parts[-1])}"
         elif len(parts) >= 3 and parts[1] == "entity":
@@ -93,6 +108,10 @@ class PythonEmitter:
                     return f"{base_ref}[({start_val} - 1):({start_val} - 1) + {len_val}]"
                 return f"{base_ref}[({start_val} - 1):]"
             return base_ref
+        elif expr.op == "func_call":
+            fn_name = self._clean_func_name(expr.symbol_id or "func")
+            args_str = ", ".join(self.emit_expr(it, model_class=model_class) for it in expr.items)
+            return f"{fn_name}({args_str})"
         elif expr.op == "tuple":
             items = ", ".join(self.emit_expr(it, model_class=model_class) for it in expr.items)
             return f"({items})"
@@ -335,8 +354,45 @@ class PythonEmitter:
             self.emit_line(f"sub_{clean_sub}(ctx, session)")
 
         elif isinstance(op, CallProgramOp):
-            clean_prog = self._clean_name(op.program_name)
-            self.emit_line(f"execute_{clean_prog}(ctx, session)")
+            prog_clean = self._clean_name(op.program_name)
+            sub_ctx_class = self._to_pascal_case(op.program_name) + "Context"
+            sub_ctx_var = f"_{prog_clean}_ctx"
+
+            self.emit_line(f"{sub_ctx_var} = {sub_ctx_class}()")
+            for b in op.bindings:
+                val_expr = self.emit_expr(b.caller_expr)
+                callee_prop = self._clean_name(b.callee_field)
+                self.emit_line(f"{sub_ctx_var}.{callee_prop} = {val_expr}")
+
+            self.emit_line(f"execute_{prog_clean}({sub_ctx_var}, session)")
+
+            for b in op.bindings:
+                if b.is_lvalue and b.caller_target_id:
+                    caller_var = self._resolve_ref(b.caller_target_id)
+                    callee_prop = self._clean_name(b.callee_field)
+                    self.emit_line(f"{caller_var} = {sub_ctx_var}.{callee_prop}")
+
+        elif isinstance(op, FetchOp):
+            prog_clean = self._clean_name(op.program_name)
+            sub_ctx_class = self._to_pascal_case(op.program_name) + "Context"
+            sub_ctx_var = f"_{prog_clean}_ctx"
+
+            self.emit_line(f"{sub_ctx_var} = {sub_ctx_class}()")
+            for b in op.bindings:
+                val_expr = self.emit_expr(b.caller_expr)
+                callee_prop = self._clean_name(b.callee_field)
+                self.emit_line(f"{sub_ctx_var}.{callee_prop} = {val_expr}")
+
+            self.emit_line(f"execute_{prog_clean}({sub_ctx_var}, session)")
+
+            for b in op.bindings:
+                if b.is_lvalue and b.caller_target_id:
+                    caller_var = self._resolve_ref(b.caller_target_id)
+                    callee_prop = self._clean_name(b.callee_field)
+                    self.emit_line(f"{caller_var} = {sub_ctx_var}.{callee_prop}")
+
+            if not op.returning:
+                self.emit_line("return ctx")
 
         elif isinstance(op, TransactionOp):
             if op.action == "commit":
@@ -500,7 +556,10 @@ class PythonEmitter:
             self.emit_line("continue")
 
         elif isinstance(op, ReturnOp):
-            self.emit_line("return ctx")
+            if op.expr:
+                self.emit_line(f"return {self.emit_expr(op.expr)}")
+            else:
+                self.emit_line("return ctx")
 
         elif isinstance(op, QueryIterationOp):
             model_name = self._clean_name(op.entity).title().replace("_", "")
@@ -658,6 +717,17 @@ class PythonEmitter:
             elif base == "date":
                 needs_date = True
 
+        for fn in self.module.functions.values():
+            if fn.return_type.base == "decimal":
+                needs_decimal = True
+            elif fn.return_type.base == "date":
+                needs_date = True
+            for p in fn.parameters:
+                if p.semantic_type.base == "decimal":
+                    needs_decimal = True
+                elif p.semantic_type.base == "date":
+                    needs_date = True
+
         def scan_expr(expr):
             nonlocal needs_decimal, needs_date, needs_datetime, needs_timedelta
             if not expr:
@@ -709,6 +779,8 @@ class PythonEmitter:
         scan_ops(self.module.operations)
         for sub in self.module.subroutines.values():
             scan_ops(sub.operations)
+        for fn in self.module.functions.values():
+            scan_ops(fn.operations)
 
         if emit_main:
             for sym in self.module.symbols.values():
@@ -743,28 +815,58 @@ class PythonEmitter:
 
         return import_lines
 
+    def _type_to_python_hint(self, sem_type: SemanticType) -> str:
+        base = sem_type.base
+        if base == "decimal":
+            return "Decimal"
+        elif base == "integer":
+            return "int"
+        elif base == "string":
+            return "str"
+        elif base == "boolean":
+            return "bool"
+        elif base == "date":
+            return "date"
+        return "Any"
+
     def generate(self, emit_main: bool = False) -> str:
         import_lines = self._collect_required_imports(emit_main=emit_main)
         for imp in import_lines:
             self.emit_line(imp)
 
-        callnat_imports = set()
-        for op in self.module.operations:
-            if isinstance(op, CallProgramOp):
-                prog = self._clean_name(op.program_name)
-                if prog != self._clean_name(self.module.module_id):
-                    callnat_imports.add(prog)
-
-        for prog in sorted(callnat_imports):
-            self.emit_line(f"from {prog} import execute_{prog}")
-
+        callnat_imports: Dict[str, Set[str]] = {}
         orm_models = set()
         needs_func = False
-        for op in self.module.operations:
-            if isinstance(op, (QueryIterationOp, EntityStoreOp)):
-                orm_models.add(self._clean_name(op.entity).title().replace("_", ""))
-                if getattr(op, "cardinality", "") == "histogram":
-                    needs_func = True
+
+        def walk_ops_for_metadata(ops):
+            nonlocal needs_func
+            for op in ops:
+                if isinstance(op, (CallProgramOp, FetchOp)):
+                    prog = self._clean_name(op.program_name)
+                    if prog != self._clean_name(self.module.module_id):
+                        if prog not in callnat_imports:
+                            callnat_imports[prog] = set()
+                        ctx_name = self._to_pascal_case(op.program_name) + "Context"
+                        callnat_imports[prog].add(ctx_name)
+                        callnat_imports[prog].add(f"execute_{prog}")
+                elif isinstance(op, (QueryIterationOp, EntityStoreOp)):
+                    orm_models.add(self._clean_name(op.entity).title().replace("_", ""))
+                    if getattr(op, "cardinality", "") == "histogram":
+                        needs_func = True
+
+                for sub_list in ("body", "then_branch", "else_branch"):
+                    if hasattr(op, sub_list):
+                        walk_ops_for_metadata(getattr(op, sub_list))
+
+        walk_ops_for_metadata(self.module.operations)
+        for sub in self.module.subroutines.values():
+            walk_ops_for_metadata(sub.operations)
+        for fn in self.module.functions.values():
+            walk_ops_for_metadata(fn.operations)
+
+        for prog in sorted(callnat_imports):
+            items = ", ".join(sorted(callnat_imports[prog]))
+            self.emit_line(f"from {prog} import {items}")
 
         if needs_func:
             self.emit_line("from sqlalchemy import func")
@@ -772,6 +874,20 @@ class PythonEmitter:
             self.emit_line(f"from target_orm import {', '.join(sorted(orm_models))}")
 
         if import_lines or callnat_imports or orm_models or needs_func:
+            self.emit_line("")
+
+        # Emit user-defined functions
+        for fn_name, fn_block in self.module.functions.items():
+            py_fn_name = self._clean_func_name(fn_name)
+            params_list = [f"{self._clean_name(p.name)}: {self._type_to_python_hint(p.semantic_type)}" for p in fn_block.parameters]
+            ret_hint = self._type_to_python_hint(fn_block.return_type)
+            self.emit_line(f"def {py_fn_name}({', '.join(params_list)}) -> {ret_hint}:")
+            self.indent_level += 1
+            if not fn_block.operations:
+                self.emit_line("pass")
+            for op in fn_block.operations:
+                self.emit_operation(op)
+            self.indent_level -= 1
             self.emit_line("")
 
         class_name = self._to_pascal_case(self.module.module_id) + "Context"

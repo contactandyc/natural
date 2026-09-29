@@ -18,6 +18,7 @@ from natural.ir.pass1_models import (
     DecideBlock,
     ForBlock,
     SubroutineBlock,
+    FunctionBlock,
     ReadWorkBlock,
     OnErrorBlock,
     AtStartBlock,
@@ -35,6 +36,9 @@ from natural.ir.models import (
     StopStatement,
     TerminateStatement,
     ResizeArrayStatement,
+    FetchStatement,
+    FunctionDefinition,
+    ScopeType,
     Expression,
     Statement,
 )
@@ -89,6 +93,30 @@ class Pass2Dispatcher:
                 statements.append(dispatched)
         return statements
 
+    def _dispatch_function_block(self, node: FunctionBlock) -> FunctionDefinition:
+        params = []
+        body_stmts = []
+        for child in node.body:
+            if isinstance(child, DefineDataBlock):
+                areas = self.data_parser.parse(child.raw_content)
+                for area in areas:
+                    if area.scope == ScopeType.PARAMETER:
+                        params.extend(area.inline_fields)
+            else:
+                dispatched = self.dispatch(child)
+                if dispatched is not None:
+                    if isinstance(dispatched, list):
+                        body_stmts.extend(dispatched)
+                    elif isinstance(dispatched, Statement):
+                        body_stmts.append(dispatched)
+
+        return FunctionDefinition(
+            name=node.name,
+            returns_raw=node.returns_clause,
+            parameters=params,
+            body=body_stmts,
+        )
+
     def lower_module(self, pass1_ast: Pass1Module) -> NaturalModule:
         ir0_module = NaturalModule(name=pass1_ast.module_name)
 
@@ -98,6 +126,9 @@ class Pass2Dispatcher:
                 ir0_module.data_areas.extend(areas)
             elif isinstance(stmt_node, SubroutineBlock):
                 ir0_module.subroutines[stmt_node.name] = self._dispatch_children(stmt_node.body)
+            elif isinstance(stmt_node, FunctionBlock):
+                func_def = self._dispatch_function_block(stmt_node)
+                ir0_module.functions[stmt_node.name] = func_def
             else:
                 dispatched = self.dispatch(stmt_node)
                 if dispatched is None:
@@ -213,6 +244,23 @@ class Pass2Dispatcher:
         if upper.startswith("PERFORM "):
             sub_name = text.split()[1].strip().upper()
             return PerformStatement(subroutine_name=sub_name)
+
+        if upper.startswith("FETCH ") or upper.startswith("FETCH\t"):
+            fetch_match = re.match(
+                r"^\s*FETCH(?:\s+(RETURN))?\s+['\"]?([A-Za-z0-9\-_]+)['\"]?(?:\s+(.+))?\s*$",
+                text,
+                re.IGNORECASE,
+            )
+            if fetch_match:
+                is_returning = bool(fetch_match.group(1))
+                target_prog = fetch_match.group(2).strip().upper()
+                args_raw = fetch_match.group(3).split() if fetch_match.group(3) else []
+                args = [self.assign_parser.expr_parser.parse(a) for a in args_raw if a.strip()]
+                return FetchStatement(
+                    program_name=target_prog,
+                    returning=is_returning,
+                    parameters=args,
+                )
 
         if upper.startswith(("UPDATE", "DELETE", "STORE", "GET ", "END TRANSACTION", "BACKOUT TRANSACTION")):
             try:

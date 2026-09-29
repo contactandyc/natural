@@ -68,7 +68,7 @@ class SubstringSpec(BaseModel):
 
 
 class Expression(BaseModel):
-    kind: str  # literal, ref, binary_op, sys_var, tuple
+    kind: str  # literal, ref, binary_op, sys_var, tuple, func_call
     value: Optional[Any] = None
     operator: Optional[str] = None
     left: Optional["Expression"] = None
@@ -76,6 +76,8 @@ class Expression(BaseModel):
     array_dim: Optional[str] = None
     array_indices: List["Expression"] = Field(default_factory=list)
     substring: Optional[SubstringSpec] = None
+    func_name: Optional[str] = None
+    func_args: List["Expression"] = Field(default_factory=list)
 
 
 SubstringSpec.model_rebuild()
@@ -174,6 +176,13 @@ class RejectStatement(Statement):
 class CallnatStatement(Statement):
     statement_type: str = "CALLNAT"
     subprogram_name: str
+    parameters: List[Expression] = Field(default_factory=list)
+
+
+class FetchStatement(Statement):
+    statement_type: str = "FETCH"
+    program_name: str
+    returning: bool = False
     parameters: List[Expression] = Field(default_factory=list)
 
 
@@ -356,9 +365,17 @@ class SubroutineDefinition(BaseModel):
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
 
 
+class FunctionDefinition(BaseModel):
+    name: str
+    returns_raw: Optional[str] = None
+    parameters: List[DataField] = Field(default_factory=list)
+    body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+
+
 class NaturalModule(BaseModel):
     name: str
     includes: List[str] = Field(default_factory=list)
     data_areas: List[DataAreaRef] = Field(default_factory=list)
     subroutines: Dict[str, List[SerializeAsAny[Statement]]] = Field(default_factory=dict)
+    functions: Dict[str, FunctionDefinition] = Field(default_factory=dict)
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)

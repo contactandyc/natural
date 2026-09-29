@@ -51,6 +51,16 @@ SemanticSubstring.model_rebuild()
 SemanticExpression.model_rebuild()
 
 
+class CallArgBinding(BaseModel):
+    caller_expr: SemanticExpression
+    callee_field: str
+    is_lvalue: bool = False
+    caller_target_id: Optional[str] = None
+
+
+CallArgBinding.model_rebuild()
+
+
 class SemanticStatement(SemanticNode):
     op: str
 
@@ -104,6 +114,7 @@ class ContinueOp(SemanticStatement):
 
 class ReturnOp(SemanticStatement):
     op: str = "return"
+    expr: Optional[SemanticExpression] = None
 
 
 class CallSubroutineOp(SemanticStatement):
@@ -115,6 +126,15 @@ class CallProgramOp(SemanticStatement):
     op: str = "call_program"
     program_name: str
     parameters: List[SemanticExpression] = Field(default_factory=list)
+    bindings: List[CallArgBinding] = Field(default_factory=list)
+
+
+class FetchOp(SemanticStatement):
+    op: str = "fetch"
+    program_name: str
+    returning: bool = False
+    parameters: List[SemanticExpression] = Field(default_factory=list)
+    bindings: List[CallArgBinding] = Field(default_factory=list)
 
 
 class TransactionOp(SemanticStatement):
@@ -251,6 +271,13 @@ class SubroutineBlockOp(BaseModel):
     operations: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
 
 
+class FunctionBlockOp(BaseModel):
+    name: str
+    return_type: SemanticType
+    parameters: List[Symbol] = Field(default_factory=list)
+    operations: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
+
+
 class OnErrorOp(SemanticStatement):
     op: str = "on_error"
     body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
@@ -262,3 +289,4 @@ class SemanticModule(BaseModel):
     symbols: Dict[str, Symbol] = Field(default_factory=dict)
     operations: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
     subroutines: Dict[str, SubroutineBlockOp] = Field(default_factory=dict)
+    functions: Dict[str, FunctionBlockOp] = Field(default_factory=dict)

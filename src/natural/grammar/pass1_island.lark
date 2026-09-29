@@ -13,6 +13,7 @@ module: statement*
       | decide_on_block
       | decide_for_block
       | subroutine_block
+      | function_block
       | read_work_block
       | on_error_block
       | at_start_block
@@ -70,6 +71,11 @@ _DEFINE_SUBROUTINE: /DEFINE\s+SUBROUTINE/i
 _END_SUBROUTINE: /END-SUBROUTINE/i
 SUBROUTINE_NAME: /[A-Za-z0-9\-_]+/
 
+function_block: _DEFINE_FUNCTION FUNCTION_NAME raw_clause? statement* _END_FUNCTION
+_DEFINE_FUNCTION.2: /DEFINE\s+FUNCTION\b/i
+_END_FUNCTION.2: /END-FUNCTION\b/i
+FUNCTION_NAME: /[*#\+A-Za-z0-9\-_]+/
+
 read_work_block: [label] _READ_WORK raw_clause statement* _END_WORK
 _READ_WORK: /READ\s+WORK\s+FILE/i
 _END_WORK: /END-WORK/i
@@ -95,7 +101,7 @@ _END_BREAK: /END-BREAK\b/i
 
 label: /[A-Za-z0-9\-_]+\./
 
-raw_statement: /(?!(?i:\s*(?:END-(?:FIND|IF|REPEAT|FOR|READ|HISTOGRAM|DEFINE|DECIDE|SUBROUTINE|WORK|ERROR|START|END|BREAK)|UNTIL|ELSE|FIND|IF|REPEAT|FOR|READ|HISTOGRAM|DEFINE|DECIDE|VALUE|WHEN|NONE|ANY|ON\s+ERROR|AT\s+START|AT\s+END|AT\s+BREAK|BEFORE\s+BREAK)\b))[^\n]+/
+raw_statement: /(?!(?i:\s*(?:END-(?:FIND|IF|REPEAT|FOR|READ|HISTOGRAM|DEFINE|DECIDE|SUBROUTINE|FUNCTION|WORK|ERROR|START|END|BREAK)|UNTIL|ELSE|FIND|IF|REPEAT|FOR|READ|HISTOGRAM|DEFINE|DECIDE|VALUE|WHEN|NONE|ANY|ON\s+ERROR|AT\s+START|AT\s+END|AT\s+BREAK|BEFORE\s+BREAK)\b))[^\n]+/
 raw_clause: /[^\n]+/
 
 %import common.WS

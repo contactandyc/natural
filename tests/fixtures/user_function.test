@@ -1,0 +1,43 @@
+=== NATURAL: USER_FUNC.nsp ===
+DEFINE FUNCTION FN#CALC_TAX RETURNS (P7.2)
+DEFINE DATA PARAMETER
+1 #AMOUNT (P7.2)
+1 #RATE   (P3.2)
+END-DEFINE
+FN#CALC_TAX := #AMOUNT * #RATE
+END-FUNCTION
+
+DEFINE DATA LOCAL
+1 #SUBTOTAL (P7.2)
+1 #RATE     (P3.2)
+1 #TOTAL    (P7.2)
+END-DEFINE
+#SUBTOTAL := 100.00
+#RATE := 0.05
+#TOTAL := #SUBTOTAL + FN#CALC_TAX(#SUBTOTAL, #RATE)
+
+=== PYTHON: user_func.py ===
+from decimal import Decimal
+
+def fn_calc_tax(amount: Decimal, rate: Decimal) -> Decimal:
+    return (amount * rate)
+
+class UserFuncContext:
+    def __init__(self):
+        self.subtotal = Decimal('0')
+        self.rate = Decimal('0')
+        self.total = Decimal('0')
+
+def execute_user_func(ctx: UserFuncContext, session):
+    ctx.subtotal = Decimal('100.00')
+    ctx.rate = Decimal('0.05')
+    ctx.total = (ctx.subtotal + fn_calc_tax(ctx.subtotal, ctx.rate))
+    return ctx
+
+=== EXECUTE ===
+- input:
+    subtotal: "100.00"
+    rate: "0.05"
+    total: "0.00"
+  expected:
+    total: "105.0000"

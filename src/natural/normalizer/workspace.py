@@ -4,6 +4,7 @@
 
 import re
 from pathlib import Path
+from typing import List, Optional
 from natural.ir.models import DataAreaRef, DataField, FieldFormat, ScopeType
 
 
@@ -62,6 +63,44 @@ class Workspace:
         except Exception as e:
             print(f"Warning: Failed to parse data area {name}: {e}")
         return None
+
+    def get_subprogram_parameters(self, name: str) -> List[DataField]:
+        """Extracts ordered parameter definitions from a target .nsn subprogram or .nsp program."""
+        clean_name = name.upper().replace(".NSN", "").replace(".NSP", "")
+        cache_key = f"PARAMS_{clean_name}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        content = self._read_file(clean_name, [".nsn", ".nsp", ".txt", ".nsa"])
+        if not content:
+            return []
+
+        try:
+            from natural.normalizer.pass1_parser import Pass1Parser
+            from natural.normalizer.pass2_dispatcher import Pass2Dispatcher
+
+            p1 = Pass1Parser(self)
+            dispatcher = Pass2Dispatcher()
+
+            pass1_ast = p1.parse(content, module_name=clean_name)
+            ir0 = dispatcher.lower_module(pass1_ast)
+
+            params: List[DataField] = []
+            for area in ir0.data_areas:
+                if area.scope == ScopeType.PARAMETER:
+                    fields = area.inline_fields
+                    if not fields:
+                        ext_area = self.get_data_area(area.name, ScopeType.PARAMETER)
+                        if ext_area:
+                            fields = ext_area.inline_fields
+                    for f in fields:
+                        if f.format:
+                            params.append(f)
+
+            self._cache[cache_key] = params
+            return params
+        except Exception:
+            return []
 
     def get_ddm(self, name: str) -> DataAreaRef | None:
         """Loads and parses a tabular Adabas Data Definition Module (.ddm)."""

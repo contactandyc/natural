@@ -3,6 +3,7 @@
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
 from decimal import Decimal
+from typing import List
 from lark import Lark, Transformer
 from natural.ir.models import Expression, SubstringSpec
 
@@ -33,7 +34,7 @@ expr_grammar = r"""
            | BOOLEAN_LITERAL                         -> bool_lit
            | SYSTEM_VAR                              -> sys_var
            | substring_func                          -> substring_expr
-           | VAR_NAME "(" RAW_BRACKET ")"            -> var_with_bracket
+           | VAR_NAME "(" [RAW_BRACKET] ")"          -> var_with_bracket
            | VAR_NAME                                -> var_ref
            | tuple_expr
            | "(" logical_or ")"
@@ -54,11 +55,42 @@ expr_grammar = r"""
     STRING: /'[^']*'/ | /"[^"]*"/
     DATE_LITERAL: /D'[^']+'/
     SYSTEM_VAR.2: /\*[A-Z0-9\-_]+(?:\([A-Za-z0-9\-_.]+\))?/
-    VAR_NAME: /[*#\+][A-Za-z0-9\-_]+((\.|\/)[A-Za-z0-9\-_]+)*/ | /[A-Za-z0-9\-_]+(\.|\/)[A-Za-z0-9\-_]+/ | /[A-Za-z][A-Za-z0-9\-_]*/
+    VAR_NAME: /[*#\+][A-Za-z0-9\-_#]+((\.|\/)[A-Za-z0-9\-_#]+)*/ | /[A-Za-z][A-Za-z0-9\-_#]*((\.|\/)[A-Za-z0-9\-_#]+)*/
 
     %import common.WS
     %ignore WS
 """
+
+
+def _split_args(content: str) -> List[str]:
+    """Splits arguments by comma while respecting nested parentheses and string quotes."""
+    args = []
+    current = []
+    depth = 0
+    in_quote = False
+    quote_char = ""
+    for char in content:
+        if char in ("'", '"'):
+            if not in_quote:
+                in_quote = True
+                quote_char = char
+            elif quote_char == char:
+                in_quote = False
+        if not in_quote:
+            if char in ("(", "["):
+                depth += 1
+            elif char in (")", "]"):
+                depth -= 1
+            elif char == "," and depth == 0:
+                args.append("".join(current).strip())
+                current = []
+                continue
+        current.append(char)
+    if current:
+        tail = "".join(current).strip()
+        if tail:
+            args.append(tail)
+    return args
 
 
 class ExpressionTransformer(Transformer):
@@ -89,7 +121,7 @@ class ExpressionTransformer(Transformer):
 
     def var_with_bracket(self, tokens):
         var_name = str(tokens[0])
-        raw_content = str(tokens[1]).strip()
+        raw_content = str(tokens[1]).strip() if len(tokens) > 1 and tokens[1] is not None else ""
 
         if ":" in raw_content:
             parts = raw_content.split(":", 1)
@@ -99,6 +131,15 @@ class ExpressionTransformer(Transformer):
                 kind="ref",
                 value=var_name,
                 substring=SubstringSpec(start=p1, length=p2),
+            )
+
+        if var_name.upper().startswith(("F#", "FN#", "UDF#")) or "," in raw_content:
+            arg_strs = _split_args(raw_content) if raw_content else []
+            args = [ExpressionParser().parse(a) for a in arg_strs]
+            return Expression(
+                kind="func_call",
+                func_name=var_name,
+                func_args=args,
             )
 
         return Expression(kind="ref", value=var_name, array_dim=raw_content)

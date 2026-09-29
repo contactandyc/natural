@@ -21,6 +21,7 @@ from natural.ir.pass1_models import (
     DecideBranchBlock,
     NoneBranchBlock,
     SubroutineBlock,
+    FunctionBlock,
     OnErrorBlock,
     AtStartBlock,
     AtEndBlock,
@@ -64,6 +65,7 @@ class IslandTransformer(Transformer):
             AtEndBlock,
             AtBreakBlock,
             BeforeBreakBlock,
+            FunctionBlock,
         )
         if len(filtered) > 1 and isinstance(filtered[0], str) and not isinstance(filtered[1], non_body_types):
             label = str(filtered[0])
@@ -149,6 +151,7 @@ class IslandTransformer(Transformer):
             AtEndBlock,
             AtBreakBlock,
             BeforeBreakBlock,
+            FunctionBlock,
         )
         for idx, item in enumerate(filtered):
             if isinstance(item, str) and not isinstance(item, non_body_types):
@@ -194,6 +197,20 @@ class IslandTransformer(Transformer):
         name = str(filtered[0]).strip().upper()
         body = filtered[1:]
         return SubroutineBlock(name=name, body=body)
+
+    def function_block(self, children) -> FunctionBlock:
+        filtered = [c for c in children if c is not None]
+        name = str(filtered[0]).strip().upper()
+        returns_clause = None
+        body_start = 1
+        if len(filtered) > 1:
+            cand = filtered[1]
+            cand_text = cand.text if isinstance(cand, RawStatement) else str(cand)
+            if "RETURNS" in cand_text.upper():
+                returns_clause = cand_text.strip()
+                body_start = 2
+        body = filtered[body_start:]
+        return FunctionBlock(name=name, returns_clause=returns_clause, body=body)
 
     def module(self, children) -> list:
         return [c for c in children if c is not None]

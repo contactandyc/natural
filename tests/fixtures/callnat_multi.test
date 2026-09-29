@@ -24,7 +24,7 @@ def execute_doubler(ctx: DoublerContext, session):
     return ctx
 
 === PYTHON: main.py ===
-from doubler import execute_doubler
+from doubler import DoublerContext, execute_doubler
 
 class MainContext:
     def __init__(self):
@@ -33,7 +33,12 @@ class MainContext:
 
 def execute_main(ctx: MainContext, session):
     ctx.val = 21
-    execute_doubler(ctx, session)
+    _doubler_ctx = DoublerContext()
+    _doubler_ctx.val = ctx.val
+    _doubler_ctx.res = ctx.res
+    execute_doubler(_doubler_ctx, session)
+    ctx.val = _doubler_ctx.val
+    ctx.res = _doubler_ctx.res
     return ctx
 
 === EXECUTE ===

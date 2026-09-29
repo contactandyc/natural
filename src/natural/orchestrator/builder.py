@@ -93,17 +93,44 @@ class ProjectBuilder:
                     for area in ir0.data_areas:
                         if area.name.upper() not in ("INLINE_LOCAL", "INLINE_PARAMETER", "INLINE_GLOBAL"):
                             self.dependency_graph[module_name].add(area.name.upper())
-                    for stmt in ir0.body:
-                        stmt_type = getattr(stmt, "statement_type", "")
-                        if stmt_type in ("FIND", "READ"):
-                            self.dependency_graph[module_name].add(stmt.view_name.upper())
-                        elif stmt_type == "CALLNAT":
-                            self.dependency_graph[module_name].add(stmt.subprogram_name.upper())
-                        elif stmt_type == "MOVE_BY_NAME":
-                            for cand in (stmt.source.upper(), stmt.target.upper()):
-                                clean_cand = cand.replace("#", "")
-                                if clean_cand in self.file_map:
-                                    self.dependency_graph[module_name].add(clean_cand)
+
+                    def extract_deps(stmts):
+                        deps = set()
+                        for s in stmts:
+                            st = getattr(s, "statement_type", "")
+                            if st in ("FIND", "READ", "HISTOGRAM"):
+                                if getattr(s, "view_name", None):
+                                    deps.add(s.view_name.upper())
+                            elif st == "CALLNAT":
+                                if getattr(s, "subprogram_name", None):
+                                    deps.add(s.subprogram_name.upper())
+                            elif st == "FETCH":
+                                if getattr(s, "program_name", None):
+                                    deps.add(s.program_name.upper())
+                            elif st == "MOVE_BY_NAME":
+                                for cand in (getattr(s, "source", "").upper(), getattr(s, "target", "").upper()):
+                                    clean_cand = cand.replace("#", "")
+                                    if clean_cand in self.file_map:
+                                        deps.add(clean_cand)
+                            for sub in ("body", "then_branch", "else_branch", "on_empty"):
+                                if hasattr(s, sub):
+                                    deps.update(extract_deps(getattr(s, sub)))
+                            if hasattr(s, "branches"):
+                                for b in s.branches:
+                                    if hasattr(b, "statements"):
+                                        deps.update(extract_deps(b.statements))
+                            if hasattr(s, "none_branch"):
+                                deps.update(extract_deps(s.none_branch))
+                        return deps
+
+                    all_stmts = list(ir0.body)
+                    for sub_body in ir0.subroutines.values():
+                        all_stmts.extend(sub_body)
+                    for fn_def in ir0.functions.values():
+                        all_stmts.extend(fn_def.body)
+
+                    self.dependency_graph[module_name].update(extract_deps(all_stmts))
+
                 except Exception as e:
                     console.print(f"[yellow]Warning: Could not extract dependencies for {module_name}: {e}[/yellow]")
 

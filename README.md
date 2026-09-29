@@ -709,3 +709,39 @@ Make "MOVE BY NAME" work
 * Identifies and preserves negative values from trailing signs (`-`), accounting suffixes (`CR`, `DB`), and parenthesized numbers (`(val)`).
 * Automatically flags `needs_decimal` import harvesting when string-to-decimal conversions occur.
 * Added tests in `tests/fixtures/move_unmask_decimal.test`.
+
+---
+
+# Chat - https://share.gemini.google/ezqi9QyKhKn6
+
+### Summary of Changes
+
+* **Positional By-Reference `CALLNAT` Parameter Synchronization:**
+* **Signature Introspection (`workspace.py`):** Added `get_subprogram_parameters()` to parse target `.nsn`/`.nsp` modules and resolve ordered parameter definitions from `DEFINE DATA PARAMETER`.
+* **Semantic Lowering (`lowering.py`):** Updated `CallProgramOp` to construct `CallArgBinding` entries, positionally mapping caller expressions to callee parameters while identifying mutable lvalues for writeback.
+* **Code Generation (`python_emitter.py`):** Emitted isolated callee context instantiation (`_<prog>_ctx = <Prog>Context()`), inbound parameter assignments, callee execution, and outbound synchronization of mutated arguments back to the caller context.
+
+
+* **Program Chaining & Flow Transfer (`FETCH` / `FETCH RETURN`):**
+* **AST & IR Models (`models.py`, `semantic.py`):** Added `FetchStatement` to IR0 and `FetchOp` to IR1, capturing program targets, return flags, and argument bindings.
+* **Parsing & Dispatch (`pass2_dispatcher.py`):** Added regex parsing for `FETCH` and `FETCH RETURN` statements with positional arguments.
+* **Emission & Execution Control (`python_emitter.py`):** Generated callee context invocation for both forms, immediately emitting an early `return ctx` on terminal `FETCH` to halt caller control flow.
+
+
+* **User-Defined Functions (`DEFINE FUNCTION`):**
+* **Grammar & Dispatch (`pass1_island.lark`, `pass1_parser.py`, `pass2_dispatcher.py`):** Added grammar rules and AST structures for `DEFINE FUNCTION ... RETURNS (...)` blocks.
+* **Semantic Lowering (`lowering.py`):** Lowered functions into `FunctionBlockOp` with typed signatures and parameters. Mapped assignments to the function name into typed `ReturnOp(expr=...)`.
+* **Emission & Invocations (`python_emitter.py`, `expression_parser.py`):** Emitted top-level typed Python functions (`def fn_<name>(...) -> <Type>:`) and lowered `func_call` AST nodes into inline Python invocations.
+
+
+* **Parser & Pipeline Hardening:**
+* **Identifier Character Sets (`expression_parser.py`):** Allowed `#` within the body of variable and function identifiers (e.g., `FN#CALC_TAX`).
+* **Parenthesis-Aware Argument Splitting (`expression_parser.py`):** Added `_split_args()` to safely parse comma-separated arguments containing nested parentheses or quoted strings.
+* **Recursive AST Dependency Scanning (`builder.py`):** Recursively walked all nested statement blocks, subroutines, and functions to register `CALLNAT`, `FETCH`, and view dependencies for topological sorting.
+* **Recursive Metadata Harvesting (`python_emitter.py`):** Traversed full operation trees to guarantee imports for nested program calls, ORM views, and functions.
+
+
+* **Test Suite Updates:**
+* Added `tests/fixtures/callnat_by_ref.test`, `tests/fixtures/fetch_control.test`, and `tests/fixtures/user_function.test`.
+* Re-baselined `tests/fixtures/callnat_multi.test` to reflect the isolated context parameter passing model.
+

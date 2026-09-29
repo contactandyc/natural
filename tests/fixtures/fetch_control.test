@@ -1,0 +1,66 @@
+=== NATURAL: CHAIN.nsp ===
+DEFINE DATA LOCAL
+1 #ACCUM (I4)
+END-DEFINE
+#ACCUM := 5
+FETCH RETURN 'STEP1' #ACCUM
+FETCH 'STEP2' #ACCUM
+#ACCUM := 9999
+
+=== NATURAL: STEP1.nsp ===
+DEFINE DATA PARAMETER
+1 #ACCUM (I4)
+END-DEFINE
+#ACCUM := #ACCUM + 10
+
+=== NATURAL: STEP2.nsp ===
+DEFINE DATA PARAMETER
+1 #ACCUM (I4)
+END-DEFINE
+#ACCUM := #ACCUM + 100
+
+=== PYTHON: chain.py ===
+from step1 import Step1Context, execute_step1
+from step2 import Step2Context, execute_step2
+
+class ChainContext:
+    def __init__(self):
+        self.accum = 0
+
+def execute_chain(ctx: ChainContext, session):
+    ctx.accum = 5
+    _step1_ctx = Step1Context()
+    _step1_ctx.accum = ctx.accum
+    execute_step1(_step1_ctx, session)
+    ctx.accum = _step1_ctx.accum
+    _step2_ctx = Step2Context()
+    _step2_ctx.accum = ctx.accum
+    execute_step2(_step2_ctx, session)
+    ctx.accum = _step2_ctx.accum
+    return ctx
+    ctx.accum = 9999
+    return ctx
+
+=== PYTHON: step1.py ===
+class Step1Context:
+    def __init__(self):
+        self.accum = 0
+
+def execute_step1(ctx: Step1Context, session):
+    ctx.accum = (ctx.accum + 10)
+    return ctx
+
+=== PYTHON: step2.py ===
+class Step2Context:
+    def __init__(self):
+        self.accum = 0
+
+def execute_step2(ctx: Step2Context, session):
+    ctx.accum = (ctx.accum + 100)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    accum: 0
+  expected:
+    accum: 115
