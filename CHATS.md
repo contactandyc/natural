@@ -629,3 +629,49 @@ print(" " * 4 + "C")
 
 * The entire test suite passed with zero regressions: **38 passed in 14.06s**.
 
+---
+
+---
+
+# Chat - Python Emitter Modular Architecture Refactor - https://share.gemini.google/Y1bJ4n1Pylra
+
+Decomposed the monolithic `src/natural/codegen/python_emitter.py` (~650 lines) into a modular, domain-driven package (`src/natural/codegen/python_emitter/`) isolating indentation and context state, dependency harvesting, expression translation, specialized formatting engines, and statement emission handlers.
+
+---
+
+### Summary of Changes
+
+* **Buffer & Context Encapsulation (`python_emitter/context.py`)**:
+* Introduced `CodeWriter` to manage line buffers and scoped block indentation via a clean context manager (`with ctx.indent():`).
+* Implemented `EmitterContext` to hold symbol tables, loop-view context stacks, PascalCase/snake_case naming helpers, type hint conversions, and contextual reference resolution (`resolve_ref`) distinguishing between loop cursors, context fields, and ORM entity models.
+
+
+* **Dependency & Import Harvesting (`python_emitter/harvester.py`)**:
+* Isolated `ImportHarvester` to perform pre-emission traversals over the IR1 operation tree.
+* Detects required standard library imports (`decimal.Decimal`, `decimal.ROUND_HALF_UP`, `datetime.date`, `datetime.datetime`, `datetime.timedelta`, `os`, `sys`), third-party tools (`sqlalchemy.func`), and external dependencies (ORM entity classes and child subprograms/contexts).
+
+
+* **Expression Translation Engine (`python_emitter/expressions.py`)**:
+* Isolated `PythonExpressionEmitter` to lower `SemanticExpression` trees into valid Python syntax.
+* Encapsulates 1-based to 0-based array subscript arithmetic (`LANG(1.1)` -> `record.lang[0][0]`), dynamic string and array slicing, operator translations, built-in functions, and date offset arithmetic via `timedelta`.
+
+
+* **Formatting Subsystems (`python_emitter/formatters.py`)**:
+* Extracted date edit mask conversion (`convert_edit_mask`) for `strftime`/`strptime`.
+* Extracted financial and numeric mask formatting (`format_numeric_edit_mask`), handling currency prefixes (`$`), zero suppression (`ZZZ,ZZ9.99`), thousands commas, and accounting sign tokens (`CR`, `DB`, trailing/leading `-` and `+`).
+
+
+* **Domain-Specific Operation Handlers (`python_emitter/handlers/`)**:
+* Replaced the monolithic `if isinstance(op, ...)` chain with an $O(1)$ dispatch registry (`DEFAULT_OPERATION_HANDLERS`) mapping IR1 semantic operations directly to targeted emitter functions:
+* **`handlers/memory.py`**: `AssignOp` (including substring assignments, slice mutations, and numeric unmasking), `MoveAllOp`, `CompressOp`, `SeparateOp`, `ExamineOp`, `ResetOp`, `ResizeArrayOp`.
+* **`handlers/database.py`**: `QueryIterationOp` (cursor queries and `func.count` histogram queries), `EntityGetOp`, `EntityRefreshOp`, `EntityUpdateOp`, `EntityStoreOp`, `EntityDeleteOp`, `TransactionOp`, `AtStartOfDataOp`, `AtEndOfDataOp`, and `AtBreakOp`.
+* **`handlers/control_flow.py`**: `BranchOp`, `LoopOp` (pre-test and post-test bounded loops), `ForLoopOp`, `BreakOp`, `ContinueOp`, `ReturnOp`, and `TerminateOp`.
+* **`handlers/invocation.py`**: `CallSubroutineOp`, `CallProgramOp`, and `FetchOp` (with caller-callee argument binding and by-reference writeback).
+* **`handlers/io.py`**: `WriteOp` (with dynamic runtime column width tab calculations), `ReadWorkFileOp`, `WriteWorkFileOp`, and `CloseWorkFileOp`.
+
+
+
+
+* **Assembly Orchestrator & Public API (`python_emitter/engine.py`, `python_emitter/__init__.py`)**:
+* Structured `PythonEmitter` to coordinate the generation of file headers, user-defined functions, typed context classes with `@property` memory redefinitions, isolated subroutine methods, entrypoint execution functions, and the optional standalone `__main__` runner block.
+* Re-exported `PythonEmitter`, `EmitterContext`, `CodeWriter`, `PythonExpressionEmitter`, and `ImportHarvester` from `natural.codegen.python_emitter` for 100% backward compatibility with `builder.py`, `cli.py`, and test fixtures.
