@@ -1,0 +1,49 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #AMT_CR     (P7.2)
+1 #AMT_DB     (P7.2)
+1 #AMT_PLUS   (P7.2)
+1 #STR_CR     (A20)
+1 #STR_DB     (A20)
+1 #STR_PLUS   (A20)
+END-DEFINE
+MOVE EDITED #AMT_CR TO #STR_CR (EM=$ZZZ,ZZ9.99CR)
+MOVE EDITED #AMT_DB TO #STR_DB (EM=$ZZZ,ZZ9.99DB)
+MOVE EDITED #AMT_PLUS TO #STR_PLUS (EM=ZZZ,ZZ9.99+)
+
+=== PYTHON ===
+from decimal import Decimal
+
+class NumericEditMaskExtendedContext:
+    def __init__(self):
+        self.amt_cr = Decimal('0')
+        self.amt_db = Decimal('0')
+        self.amt_plus = Decimal('0')
+        self.str_cr = ""
+        self.str_db = ""
+        self.str_plus = ""
+
+def execute_numeric_edit_mask_extended(ctx: NumericEditMaskExtendedContext, session):
+    ctx.str_cr = f"${abs(ctx.amt_cr):>10,.2f}{'CR' if ctx.amt_cr < 0 else '  '}"
+    ctx.str_db = f"${abs(ctx.amt_db):>10,.2f}{'DB' if ctx.amt_db < 0 else '  '}"
+    ctx.str_plus = f"{abs(ctx.amt_plus):,.2f}{'-' if ctx.amt_plus < 0 else '+'}"
+    return ctx
+
+=== EXECUTE ===
+- input:
+    amt_cr: "-123.45"
+    amt_db: "5000.00"
+    amt_plus: "45.10"
+  expected:
+    str_cr: "$    123.45CR"
+    str_db: "$  5,000.00  "
+    str_plus: "45.10+"
+
+- input:
+    amt_cr: "12345.67"
+    amt_db: "-250.50"
+    amt_plus: "-88.00"
+  expected:
+    str_cr: "$ 12,345.67  "
+    str_db: "$    250.50DB"
+    str_plus: "88.00-"

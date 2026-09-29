@@ -130,6 +130,75 @@ class PythonEmitter:
     def _convert_edit_mask(self, mask: str) -> str:
         return mask.replace("YYYY", "%Y").replace("YY", "%y").replace("MM", "%m").replace("DD", "%d")
 
+    def _format_numeric_edit_mask(self, target: str, src_ref: str, mask: str) -> str:
+        raw_mask = mask.strip().upper()
+
+        has_currency = "$" in raw_mask
+        prefix = "$" if has_currency else ""
+        cleaned = raw_mask.replace("$", "").strip()
+
+        suffix_token = None
+        if cleaned.endswith("CR"):
+            suffix_token = "CR"
+            cleaned = cleaned[:-2].strip()
+        elif cleaned.endswith("DB"):
+            suffix_token = "DB"
+            cleaned = cleaned[:-2].strip()
+        elif cleaned.endswith("-"):
+            suffix_token = "-"
+            cleaned = cleaned[:-1].strip()
+        elif cleaned.endswith("+"):
+            suffix_token = "+"
+            cleaned = cleaned[:-1].strip()
+
+        prefix_sign = None
+        if not suffix_token:
+            if cleaned.startswith("+"):
+                prefix_sign = "+"
+                cleaned = cleaned[1:].strip()
+            elif cleaned.startswith("-"):
+                prefix_sign = "-"
+                cleaned = cleaned[1:].strip()
+
+        decimals = 0
+        if "." in cleaned:
+            int_part, dec_part = cleaned.split(".", 1)
+            decimals = len(dec_part)
+        else:
+            int_part = cleaned
+
+        use_comma = "," in int_part
+        has_zero_suppression = int_part.count("Z") > 0
+        total_num_width = len(int_part) + (1 + decimals if decimals > 0 else 0)
+
+        is_fixed_column = has_currency or suffix_token in ("CR", "DB")
+        if is_fixed_column and has_zero_suppression:
+            fmt_spec = f">{total_num_width},.{decimals}f" if use_comma else f">{total_num_width}.{decimals}f"
+            pos_padding = "  " if suffix_token in ("CR", "DB") else (" " if suffix_token in ("-", "+") else "")
+        else:
+            fmt_spec = f",.{decimals}f" if use_comma else f".{decimals}f"
+            pos_padding = ""
+
+        value_expr = f"abs({src_ref})" if (suffix_token or prefix_sign) else src_ref
+
+        suffix_code = ""
+        if suffix_token == "CR":
+            suffix_code = f"{{'CR' if {src_ref} < 0 else '{pos_padding}'}}"
+        elif suffix_token == "DB":
+            suffix_code = f"{{'DB' if {src_ref} < 0 else '{pos_padding}'}}"
+        elif suffix_token == "-":
+            suffix_code = f"{{'-' if {src_ref} < 0 else '{pos_padding}'}}"
+        elif suffix_token == "+":
+            suffix_code = f"{{'-' if {src_ref} < 0 else '+'}}"
+
+        prefix_code = prefix
+        if prefix_sign == "+":
+            prefix_code += f"{{'-' if {src_ref} < 0 else '+'}}"
+        elif prefix_sign == "-":
+            prefix_code += f"{{'-' if {src_ref} < 0 else ' '}}"
+
+        return f"{target} = f\"{prefix_code}{{{value_expr}:{fmt_spec}}}{suffix_code}\""
+
     def emit_operation(self, op):
         if isinstance(op, AssignOp):
             target = self._resolve_ref(op.target_id)
@@ -163,19 +232,9 @@ class PythonEmitter:
                     self.emit_line(f"{target} = datetime.strptime({self._resolve_ref(op.expr.symbol_id)}, '{py_mask}').date()")
                     return
                 elif target_sym.semantic_type.base == "string" and source_sym.semantic_type.base in ("decimal", "integer", "numeric"):
-                    mask = op.edit_mask.upper()
-                    decimals = 0
-                    if "." in mask:
-                        dec_part = mask.split(".", 1)[1].rstrip("-+CRDB")
-                        decimals = len(dec_part)
-                    use_comma = "," in mask
-                    has_trailing_minus = mask.endswith("-")
-                    fmt_spec = f",.{decimals}f" if use_comma else f".{decimals}f"
                     src_ref = self._resolve_ref(op.expr.symbol_id)
-                    if has_trailing_minus:
-                        self.emit_line(f"{target} = f\"{{abs({src_ref}):{fmt_spec}}}{{'-' if {src_ref} < 0 else ''}}\"")
-                    else:
-                        self.emit_line(f"{target} = f\"{{{src_ref}:{fmt_spec}}}\"")
+                    formatted_line = self._format_numeric_edit_mask(target, src_ref, op.edit_mask)
+                    self.emit_line(formatted_line)
                     return
                 elif target_sym.semantic_type.base in ("decimal", "numeric") and source_sym.semantic_type.base == "string":
                     src_ref = self._resolve_ref(op.expr.symbol_id)
