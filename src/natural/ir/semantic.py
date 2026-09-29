@@ -269,9 +269,21 @@ class CloseWorkFileOp(SemanticStatement):
     file_number: int
 
 
+class WriteOp(SemanticStatement):
+    op: str = "write"
+    operands: List[SemanticExpression] = Field(default_factory=list)
+    is_write: bool = True  # True for WRITE, False for PRINT
+
+
+class OnErrorOp(SemanticStatement):
+    op: str = "on_error"
+    body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
+
+
 class SubroutineBlockOp(BaseModel):
     name: str
     operations: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
+    on_error: Optional[OnErrorOp] = None
 
 
 class FunctionBlockOp(BaseModel):
@@ -279,11 +291,6 @@ class FunctionBlockOp(BaseModel):
     return_type: SemanticType
     parameters: List[Symbol] = Field(default_factory=list)
     operations: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
-
-
-class OnErrorOp(SemanticStatement):
-    op: str = "on_error"
-    body: List[SerializeAsAny[SemanticStatement]] = Field(default_factory=list)
 
 
 class SemanticModule(BaseModel):

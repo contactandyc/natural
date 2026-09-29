@@ -38,6 +38,7 @@ from natural.ir.models import (
     ResizeArrayStatement,
     FetchStatement,
     FunctionDefinition,
+    SubroutineDefinition,
     ScopeType,
     Expression,
     Statement,
@@ -125,7 +126,23 @@ class Pass2Dispatcher:
                 areas = self.data_parser.parse(stmt_node.raw_content)
                 ir0_module.data_areas.extend(areas)
             elif isinstance(stmt_node, SubroutineBlock):
-                ir0_module.subroutines[stmt_node.name] = self._dispatch_children(stmt_node.body)
+                sub_body = []
+                sub_on_error = None
+                for child in stmt_node.body:
+                    if isinstance(child, OnErrorBlock):
+                        sub_on_error = OnErrorBlockStatement(body=self._dispatch_children(child.body))
+                    else:
+                        dispatched = self.dispatch(child)
+                        if dispatched is not None:
+                            if isinstance(dispatched, list):
+                                sub_body.extend(dispatched)
+                            elif isinstance(dispatched, Statement):
+                                sub_body.append(dispatched)
+                ir0_module.subroutines[stmt_node.name] = SubroutineDefinition(
+                    name=stmt_node.name,
+                    body=sub_body,
+                    on_error=sub_on_error,
+                )
             elif isinstance(stmt_node, FunctionBlock):
                 func_def = self._dispatch_function_block(stmt_node)
                 ir0_module.functions[stmt_node.name] = func_def
@@ -304,7 +321,7 @@ class Pass2Dispatcher:
         if upper.startswith("CALLNAT "):
             return self.callnat_parser.parse(text)
 
-        if upper.startswith(("PRINT ", "WRITE ", "INPUT ")):
+        if re.match(r"^\s*(?:PRINT|WRITE|INPUT)\b", text, re.IGNORECASE):
             return self.io_parser.parse(text)
 
         if upper.startswith(("ASSIGN ", "COMPUTE ")) or ":=" in upper or (

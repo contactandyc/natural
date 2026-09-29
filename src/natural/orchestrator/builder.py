@@ -13,6 +13,7 @@ from natural.normalizer.pass1_parser import Pass1Parser
 from natural.normalizer.pass2_dispatcher import Pass2Dispatcher
 from natural.normalizer.lowering import SemanticLoweringPass
 from natural.normalizer.workspace import Workspace
+from natural.ir.models import SubroutineDefinition
 from natural.ir.serializer import serialize_to_yaml
 from natural.codegen.python_emitter import PythonEmitter
 from natural.codegen.orm_emitter import ORMEmitter
@@ -124,8 +125,13 @@ class ProjectBuilder:
                         return deps
 
                     all_stmts = list(ir0.body)
-                    for sub_body in ir0.subroutines.values():
-                        all_stmts.extend(sub_body)
+                    for sub_item in ir0.subroutines.values():
+                        if isinstance(sub_item, SubroutineDefinition):
+                            all_stmts.extend(sub_item.body)
+                            if sub_item.on_error:
+                                all_stmts.extend(sub_item.on_error.body)
+                        else:
+                            all_stmts.extend(sub_item)
                     for fn_def in ir0.functions.values():
                         all_stmts.extend(fn_def.body)
 

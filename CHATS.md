@@ -524,3 +524,74 @@ All requirements outlined in **Phase 4: Advanced Schema, Arrays & Adabas Complex
 4. **Sub-Parser Reentrancy (`expression_parser.py`)**:
 * Bracket parsing now uses a module-level cached `ExpressionParser` instance instead of instantiating new Lark grammars on every slice evaluation.
 
+
+
+---
+
+# Chat - https://share.gemini.google/ojUYz7SrV87D
+
+### Summary of Completed Work
+
+#### 1. Formatted Output & Column Tabulation (Feature 5.1)
+
+* **Parser Tokenization (`src/natural/normalizer/parsers/io_parser.py`)**:
+* Added `WRITE_TAB.5: /\d+[Tt]/` and `NEWLINE_SPLIT: "/"` terminals, elevating terminal priority above `NUMBER.2` to eliminate token collisions on entries like `5T`.
+* Updated `IOTransformer` to convert tabs and slash continuations into typed `Expression(kind="tab", value=col)` and `Expression(kind="newline", value="/")` nodes, while delegating bracket expressions to `ExpressionParser` for array subscript support.
+
+
+* **IR Schema (`src/natural/ir/models.py`, `src/natural/ir/semantic.py`)**:
+* Added `tab` and `newline` kinds to syntactic `Expression`.
+* Introduced `WriteOp(operands, is_write)` into IR1 semantic operations.
+
+
+* **Semantic Lowering (`src/natural/normalizer/lowering.py`)**:
+* Lowered `WriteStatement` and `PrintStatement` into `WriteOp`, converting tabulation targets and newline indicators into semantic expressions.
+
+
+* **Code Generation (`src/natural/codegen/python_emitter.py`)**:
+* Emitted partitioned `print()` statements split across newline boundaries.
+* Added dynamic column tracking that calculates character widths and emits padding arithmetic:
+```python
+print(" " * 4 + "A" + " " * (34 - len("    A")) + "B")
+print(" " * 4 + "C")
+
+```
+
+
+
+
+* **Test Fixture (`tests/fixtures/io_tabulation.test`)**:
+* Added end-to-end golden master test verifying tab alignment and execution against in-memory contexts.
+
+
+
+---
+
+#### 2. Scoped Subroutine Error Handling (Feature 5.2)
+
+* **AST Dispatching (`src/natural/ir/models.py`, `src/natural/normalizer/pass2_dispatcher.py`)**:
+* Added `on_error: Optional[OnErrorBlockStatement]` to `SubroutineDefinition`.
+* Updated `Pass2Dispatcher.lower_module()` to intercept `OnErrorBlock` nested within `SubroutineBlock`, routing it directly to `SubroutineDefinition.on_error` instead of leaking into the subroutine statement list or top-level module scope.
+
+
+* **Semantic Lowering (`src/natural/ir/semantic.py`, `src/natural/normalizer/lowering.py`)**:
+* Added `on_error: Optional[OnErrorOp]` to `SubroutineBlockOp`.
+* Lowered subroutine error statements into isolated `OnErrorOp` nodes during module normalization.
+
+
+* **Code Generation & Project Builder (`src/natural/codegen/python_emitter.py`, `src/natural/orchestrator/builder.py`)**:
+* Wrapped generated `sub_<name>()` bodies in localized `try: ... except Exception as natural_err:` handlers when `on_error` is present, returning the mutated context without wrapping the caller `execute_<module>()` entry point.
+* Extended `_collect_required_imports()`, `walk_ops_for_metadata()`, and DAG dependency scanning to traverse subroutine `on_error` statement trees.
+
+
+* **Test Fixture (`tests/fixtures/on_error_subroutine.test`)**:
+* Added test fixture validating that exceptions inside subroutines trigger localized recovery handlers while caller execution continues sequentially.
+
+
+
+---
+
+#### 3. Verification & Regressions
+
+* The entire test suite passed with zero regressions: **38 passed in 14.06s**.
+

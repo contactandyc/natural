@@ -39,6 +39,7 @@ from natural.ir.semantic import (
     WriteWorkFileOp,
     CloseWorkFileOp,
     OnErrorOp,
+    WriteOp,
     FunctionBlockOp,
 )
 
@@ -228,7 +229,64 @@ class PythonEmitter:
         return f"{target} = f\"{prefix_code}{{{value_expr}:{fmt_spec}}}{suffix_code}\""
 
     def emit_operation(self, op):
-        if isinstance(op, AssignOp):
+        if isinstance(op, WriteOp):
+            lines_operands = []
+            curr_line = []
+            for operand in op.operands:
+                if operand.op == "newline":
+                    lines_operands.append(curr_line)
+                    curr_line = []
+                else:
+                    curr_line.append(operand)
+            lines_operands.append(curr_line)
+
+            for line_ops in lines_operands:
+                if not line_ops:
+                    self.emit_line("print()")
+                    continue
+
+                has_tab = any(e.op == "tab" for e in line_ops)
+                if not has_tab:
+                    parts = [self.emit_expr(e) for e in line_ops]
+                    self.emit_line(f"print({', '.join(parts)})")
+                else:
+                    code_parts = []
+                    sim_parts = []
+                    for e in line_ops:
+                        if e.op == "tab":
+                            target_col = max(0, int(e.value) - 1)
+                            if not sim_parts:
+                                if target_col > 0:
+                                    code_parts.append(f'" " * {target_col}')
+                                    sim_parts.append(" " * target_col)
+                            else:
+                                if all(isinstance(p, str) for p in sim_parts):
+                                    sim_str = "".join(sim_parts)
+                                    code_parts.append(f'" " * ({target_col} - len("{sim_str}"))')
+                                    curr_len = len(sim_str)
+                                    diff = max(0, target_col - curr_len)
+                                    sim_parts.append(" " * diff)
+                                else:
+                                    sim_expr = " + ".join(sim_parts)
+                                    code_parts.append(f'" " * ({target_col} - len({sim_expr}))')
+                                    sim_parts.append(f'" " * max(0, {target_col} - len({sim_expr}))')
+                        else:
+                            if e.op == "literal" and isinstance(e.value, str):
+                                code_parts.append(f'"{e.value}"')
+                                sim_parts.append(e.value)
+                            elif e.op == "literal":
+                                val_str = str(e.value)
+                                code_parts.append(repr(e.value))
+                                sim_parts.append(val_str)
+                            else:
+                                expr_code = self.emit_expr(e)
+                                code_parts.append(f"str({expr_code})")
+                                sim_parts.append(f"str({expr_code})")
+
+                    line_code = " + ".join(code_parts)
+                    self.emit_line(f"print({line_code})")
+
+        elif isinstance(op, AssignOp):
             target = self._resolve_ref(op.target_id)
             if getattr(op, "target_indices", None):
                 for idx in op.target_indices:
@@ -806,6 +864,8 @@ class PythonEmitter:
         scan_ops(self.module.operations)
         for sub in self.module.subroutines.values():
             scan_ops(sub.operations)
+            if sub.on_error:
+                scan_ops(sub.on_error.body)
         for fn in self.module.functions.values():
             scan_ops(fn.operations)
 
@@ -888,6 +948,8 @@ class PythonEmitter:
         walk_ops_for_metadata(self.module.operations)
         for sub in self.module.subroutines.values():
             walk_ops_for_metadata(sub.operations)
+            if sub.on_error:
+                walk_ops_for_metadata(sub.on_error.body)
         for fn in self.module.functions.values():
             walk_ops_for_metadata(fn.operations)
 
@@ -981,10 +1043,26 @@ class PythonEmitter:
             sub_func = f"sub_{self._clean_name(sub_name)}"
             self.emit_line(f"def {sub_func}(ctx: {class_name}, session):")
             self.indent_level += 1
-            for op in sub_block.operations:
-                self.emit_operation(op)
-            if not sub_block.operations:
-                self.emit_line("pass")
+            if sub_block.on_error:
+                self.emit_line("try:")
+                self.indent_level += 1
+                if not sub_block.operations:
+                    self.emit_line("pass")
+                for op in sub_block.operations:
+                    self.emit_operation(op)
+                self.indent_level -= 1
+                self.emit_line("except Exception as natural_err:")
+                self.indent_level += 1
+                if not sub_block.on_error.body:
+                    self.emit_line("pass")
+                for op in sub_block.on_error.body:
+                    self.emit_operation(op)
+                self.indent_level -= 1
+            else:
+                for op in sub_block.operations:
+                    self.emit_operation(op)
+                if not sub_block.operations:
+                    self.emit_line("pass")
             self.emit_line("return ctx")
             self.indent_level -= 1
             self.emit_line("")

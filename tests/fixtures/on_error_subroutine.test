@@ -1,0 +1,64 @@
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #INPUT_VAL (I4)
+1 #DIVISOR   (I4)
+1 #STATUS    (A20)
+1 #STEP      (A20)
+END-DEFINE
+
+#STEP := 'STARTED'
+PERFORM SAFE-CALC
+#STEP := 'AFTER_SUBROUTINE'
+
+DEFINE SUBROUTINE SAFE-CALC
+    ON ERROR
+        #STATUS := 'SUBROUTINE_ERROR'
+        ESCAPE ROUTINE
+    END-ERROR
+    #INPUT_VAL := #INPUT_VAL / #DIVISOR
+    #STATUS := 'SUCCESS'
+END-SUBROUTINE
+
+=== PYTHON ===
+class OnErrorSubroutineContext:
+    def __init__(self):
+        self.input_val = 0
+        self.divisor = 0
+        self.status = ""
+        self.step = ""
+
+def sub_safe_calc(ctx: OnErrorSubroutineContext, session):
+    try:
+        ctx.input_val = int((ctx.input_val / ctx.divisor))
+        ctx.status = 'SUCCESS'
+    except Exception as natural_err:
+        ctx.status = 'SUBROUTINE_ERROR'
+        return ctx
+    return ctx
+
+def execute_on_error_subroutine(ctx: OnErrorSubroutineContext, session):
+    ctx.step = 'STARTED'
+    sub_safe_calc(ctx, session)
+    ctx.step = 'AFTER_SUBROUTINE'
+    return ctx
+
+=== EXECUTE ===
+- input:
+    input_val: 10
+    divisor: 2
+    status: ""
+    step: ""
+  expected:
+    input_val: 5
+    status: "SUCCESS"
+    step: "AFTER_SUBROUTINE"
+
+- input:
+    input_val: 10
+    divisor: 0
+    status: ""
+    step: ""
+  expected:
+    input_val: 10
+    status: "SUBROUTINE_ERROR"
+    step: "AFTER_SUBROUTINE"

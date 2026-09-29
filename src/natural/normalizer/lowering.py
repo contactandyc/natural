@@ -26,6 +26,7 @@ from natural.ir.models import (
     CallnatStatement,
     FetchStatement,
     FunctionDefinition,
+    SubroutineDefinition,
     UpdateStatement,
     DeleteStatement,
     StoreStatement,
@@ -44,6 +45,8 @@ from natural.ir.models import (
     WriteWorkFileStatement,
     CloseWorkFileStatement,
     OnErrorBlockStatement,
+    PrintStatement,
+    WriteStatement,
 )
 from natural.ir.semantic import (
     SemanticModule,
@@ -84,6 +87,7 @@ from natural.ir.semantic import (
     SubroutineBlockOp,
     FunctionBlockOp,
     OnErrorOp,
+    WriteOp,
 )
 from natural.normalizer.workspace import Workspace
 
@@ -373,6 +377,11 @@ class SemanticLoweringPass:
         return results
 
     def lower_expr(self, expr: Expression) -> SemanticExpression:
+        if expr.kind == "tab":
+            return SemanticExpression(op="tab", value=expr.value)
+        elif expr.kind == "newline":
+            return SemanticExpression(op="newline", value=expr.value or "/")
+
         if expr.kind == "ref" and str(expr.value).startswith("*"):
             expr = Expression(kind="sys_var", value=expr.value)
 
@@ -505,7 +514,22 @@ class SemanticLoweringPass:
         return self.loop_stack[-1].loop_id
 
     def lower_statement(self, stmt) -> list:
-        if isinstance(stmt, AssignStatement):
+        if isinstance(stmt, (WriteStatement, PrintStatement)):
+            raw_items = stmt.items if isinstance(stmt, WriteStatement) else stmt.fields
+            lowered_operands = []
+            for it in raw_items:
+                if isinstance(it, Expression):
+                    lowered_operands.append(self.lower_expr(it))
+                else:
+                    lowered_operands.append(SemanticExpression(op="literal", value=it))
+            return [
+                WriteOp(
+                    operands=lowered_operands,
+                    is_write=isinstance(stmt, WriteStatement),
+                )
+            ]
+
+        elif isinstance(stmt, AssignStatement):
             target_str = str(stmt.target.value) if hasattr(stmt.target, "value") else str(stmt.target)
 
             if self.active_function_name:
@@ -1072,8 +1096,24 @@ class SemanticLoweringPass:
         ops = self.lower_statements(self.ast.body)
 
         subs = {}
-        for sub_name, stmts in self.ast.subroutines.items():
-            subs[sub_name] = SubroutineBlockOp(name=sub_name, operations=self.lower_statements(stmts))
+        for sub_name, sub_item in self.ast.subroutines.items():
+            if isinstance(sub_item, SubroutineDefinition):
+                ops_sub = self.lower_statements(sub_item.body)
+                on_err_op = (
+                    OnErrorOp(body=self.lower_statements(sub_item.on_error.body))
+                    if sub_item.on_error
+                    else None
+                )
+                subs[sub_name] = SubroutineBlockOp(
+                    name=sub_name,
+                    operations=ops_sub,
+                    on_error=on_err_op,
+                )
+            else:
+                subs[sub_name] = SubroutineBlockOp(
+                    name=sub_name,
+                    operations=self.lower_statements(sub_item),
+                )
 
         funcs = {}
         for fn_name, fn_def in self.ast.functions.items():

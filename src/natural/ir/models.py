@@ -3,7 +3,7 @@
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field, SerializeAsAny
 
 
@@ -20,8 +20,6 @@ class FieldFormat(BaseModel):
     digits: Optional[int] = None
     decimals: Optional[int] = None
 
-
-# In src/natural/ir/models.py around line 33:
 
 class DataField(BaseModel):
     level: int = 1
@@ -73,7 +71,7 @@ class SubstringSpec(BaseModel):
 
 
 class Expression(BaseModel):
-    kind: str  # literal, ref, binary_op, sys_var, tuple, func_call
+    kind: str  # literal, ref, binary_op, sys_var, tuple, func_call, tab, newline
     value: Optional[Any] = None
     operator: Optional[str] = None
     left: Optional["Expression"] = None
@@ -368,6 +366,7 @@ class OnErrorBlockStatement(Statement):
 class SubroutineDefinition(BaseModel):
     name: str
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
+    on_error: Optional[OnErrorBlockStatement] = None
 
 
 class FunctionDefinition(BaseModel):
@@ -381,6 +380,6 @@ class NaturalModule(BaseModel):
     name: str
     includes: List[str] = Field(default_factory=list)
     data_areas: List[DataAreaRef] = Field(default_factory=list)
-    subroutines: Dict[str, List[SerializeAsAny[Statement]]] = Field(default_factory=dict)
+    subroutines: Dict[str, Union[SubroutineDefinition, List[SerializeAsAny[Statement]]]] = Field(default_factory=dict)
     functions: Dict[str, FunctionDefinition] = Field(default_factory=dict)
     body: List[SerializeAsAny[Statement]] = Field(default_factory=list)
