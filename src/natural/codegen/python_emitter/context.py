@@ -2,32 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
-from contextlib import contextmanager
 from typing import Dict, List, Optional
+from natural.codegen.common import CodeWriter, clean_func_name, clean_name, to_pascal_case
 from natural.ir.semantic import SemanticModule, SemanticType, Symbol
-
-
-class CodeWriter:
-    """Manages string lines and scoped indentation level."""
-
-    def __init__(self):
-        self.lines: List[str] = []
-        self.indent_level: int = 0
-
-    def emit_line(self, line: str) -> None:
-        if not line:
-            self.lines.append("")
-        else:
-            indent = "    " * self.indent_level
-            self.lines.append(f"{indent}{line}")
-
-    @contextmanager
-    def indent(self):
-        self.indent_level += 1
-        try:
-            yield
-        finally:
-            self.indent_level -= 1
 
 
 class EmitterContext:
@@ -51,35 +28,23 @@ class EmitterContext:
     def indent_level(self, val: int):
         self.writer.indent_level = val
 
-    def emit_line(self, line: str) -> None:
-        self.writer.emit_line(line)
+    def emit_line(self, line: str = "", indent_offset: int = 0) -> None:
+        self.writer.emit_line(line, indent_offset=indent_offset)
 
-    def indent(self):
-        return self.writer.indent()
+    def indent(self, levels: int = 1):
+        return self.writer.indent(levels=levels)
 
     def get_symbol(self, symbol_id: str) -> Optional[Symbol]:
         return self._sym_by_id.get(symbol_id)
 
     def clean_name(self, name: str) -> str:
-        clean = name.split(".")[-1].replace("#", "").replace("-", "_").lower()
-        if clean == "class":
-            return "class_"
-        return clean
+        return clean_name(name)
 
     def clean_func_name(self, name: str) -> str:
-        clean = name.replace("#", "_").replace("-", "_").lower()
-        while clean.startswith("fn_") or clean.startswith("f_") or clean.startswith("udf_"):
-            if clean.startswith("fn_"):
-                clean = clean[3:]
-            elif clean.startswith("f_"):
-                clean = clean[2:]
-            elif clean.startswith("udf_"):
-                clean = clean[4:]
-        return f"fn_{clean}"
+        return clean_func_name(name)
 
     def to_pascal_case(self, name: str) -> str:
-        clean = name.split(".")[-1].replace("#", "").replace("-", "_").lower()
-        return "".join(part.title() for part in clean.split("_") if part)
+        return to_pascal_case(name)
 
     def resolve_ref(self, symbol_id: str, model_class: Optional[str] = None) -> str:
         if symbol_id.startswith("record."):

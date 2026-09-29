@@ -675,3 +675,33 @@ Decomposed the monolithic `src/natural/codegen/python_emitter.py` (~650 lines) i
 * **Assembly Orchestrator & Public API (`python_emitter/engine.py`, `python_emitter/__init__.py`)**:
 * Structured `PythonEmitter` to coordinate the generation of file headers, user-defined functions, typed context classes with `@property` memory redefinitions, isolated subroutine methods, entrypoint execution functions, and the optional standalone `__main__` runner block.
 * Re-exported `PythonEmitter`, `EmitterContext`, `CodeWriter`, `PythonExpressionEmitter`, and `ImportHarvester` from `natural.codegen.python_emitter` for 100% backward compatibility with `builder.py`, `cli.py`, and test fixtures.
+
+
+---
+
+# Chat - Shared Codegen Utilities & ORM Emitter Decoupling - https://share.gemini.google/VBSlKCDuocr8
+
+Extracted shared code generation primitives into `src/natural/codegen/common/`, preserving a clean separation of concerns between schema generation (`ORMEmitter`) and module logic generation (`PythonEmitter`) while eliminating duplicated line-buffering and naming logic.
+
+---
+
+### Summary of Changes
+
+* **Shared Code Writer (`codegen/common/writer.py`)**:
+* Implemented `CodeWriter` with scoped indentation management (`with writer.indent():`), offset-based line emission, and full buffer materialization (`get_code()`).
+* Replaces manual whitespace multiplication (`"    " * indent_level`) across both emitters.
+
+
+* **Unified Python Identifier Sanitization (`codegen/common/naming.py`)**:
+* Centralized Python keyword escaping (`clean_name`) to prevent keyword collisions (e.g., mapping `CLASS` $\to$ `class_`).
+* Added shared function identifier normalization (`clean_func_name`) and class PascalCase formatting (`to_pascal_case`).
+
+
+* **ORMEmitter Modernization (`codegen/orm_emitter.py`)**:
+* Refactored `ORMEmitter` to compose `CodeWriter` and use shared naming utilities.
+* Retained dedicated singleton lifecycle (collating workspace DDMs into `target_orm.py`) completely independent of IR1 behavioral logic.
+
+
+* **PythonEmitter Context Integration (`codegen/python_emitter/context.py`)**:
+* Replaced internal writer logic in `EmitterContext` with `CodeWriter` and delegated naming transformations to `codegen.common`.
+* Ensures naming consistency between generated ORM models and runtime query references without coupling their compilation pipelines.
