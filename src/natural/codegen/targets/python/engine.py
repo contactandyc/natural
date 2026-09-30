@@ -4,11 +4,11 @@
 
 from typing import Callable, Dict, List, Optional, Type
 from natural.ir.semantic import OnErrorOp, SemanticExpression, SemanticModule, SemanticStatement, SemanticType, Symbol
-from natural.codegen.python_emitter.context import EmitterContext
-from natural.codegen.python_emitter.expressions import PythonExpressionEmitter
-from natural.codegen.python_emitter.formatters import convert_edit_mask, format_numeric_edit_mask
-from natural.codegen.python_emitter.handlers import DEFAULT_OPERATION_HANDLERS
-from natural.codegen.python_emitter.harvester import ImportHarvester
+from natural.codegen.targets.python.context import EmitterContext
+from natural.codegen.targets.python.expressions import PythonExpressionEmitter
+from natural.codegen.targets.python.formatters import convert_edit_mask, format_numeric_edit_mask
+from natural.codegen.targets.python.handlers import DEFAULT_OPERATION_HANDLERS
+from natural.codegen.targets.python.harvester import ImportHarvester
 
 
 class PythonEmitter:

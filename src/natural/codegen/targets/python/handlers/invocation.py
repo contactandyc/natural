@@ -7,8 +7,8 @@ from natural.ir.semantic import (
     CallSubroutineOp,
     FetchOp,
 )
-from natural.codegen.python_emitter.context import EmitterContext
-from natural.codegen.python_emitter.expressions import PythonExpressionEmitter
+from natural.codegen.targets.python.context import EmitterContext
+from natural.codegen.targets.python.expressions import PythonExpressionEmitter
 
 
 def emit_call_subroutine(

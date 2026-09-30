@@ -14,7 +14,7 @@ from natural.ir.semantic import (
     ReadWorkFileOp,
     TerminateOp,
 )
-from natural.codegen.python_emitter.context import EmitterContext
+from natural.codegen.targets.python.context import EmitterContext
 
 
 class ImportHarvester:

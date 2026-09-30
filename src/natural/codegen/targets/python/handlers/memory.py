@@ -11,9 +11,9 @@ from natural.ir.semantic import (
     ResizeArrayOp,
     SeparateOp,
 )
-from natural.codegen.python_emitter.context import EmitterContext
-from natural.codegen.python_emitter.expressions import PythonExpressionEmitter
-from natural.codegen.python_emitter.formatters import convert_edit_mask, format_numeric_edit_mask
+from natural.codegen.targets.python.context import EmitterContext
+from natural.codegen.targets.python.expressions import PythonExpressionEmitter
+from natural.codegen.targets.python.formatters import convert_edit_mask, format_numeric_edit_mask
 
 
 def emit_assign(

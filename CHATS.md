@@ -731,3 +731,47 @@ Resolved edge-case bugs in code emission affecting database queries, array mutat
     - Upgraded the `MockSession` test harness to auto-cast floats and decimal-formatted strings into Python `Decimal` objects during mock record instantiation, preventing `str` vs `Decimal` comparison crashes in dynamic test evaluation.
     - Replaced the abstract array-manipulation `SAMPLE.nsp` code in `README.md` with a practical, business-logic-focused `BONUSCALC.nsp` example.
     - Added `tests/fixtures/readme.test` to enforce the new documentation snippet, and updated legacy snapshots to reflect the new `limit()` and `max()` codegen behaviors.
+
+
+---
+
+---
+
+# Chat - Multi-Target Backend Architecture & IR1 Sanitization - https://share.gemini.google/38n0gM6NXhfP
+
+Decoupled the compiler frontend and semantic lowering passes from Python-specific syntax, established a pluggable target backend protocol (`TargetBackend`), relocated Python codegen under `src/natural/codegen/targets/python/`, and added multi-target selection to `ProjectBuilder` and the CLI.
+
+---
+
+### Summary of Changes
+
+* **IR1 Semantic Sanitization (`lowering/expressions.py`)**:
+* Eliminated hardcoded Python expressions from IR1 nodes.
+* Replaced Python evaluation strings (`"date.today()"`, `"datetime.now().time()"`, `"loop_counter"`, `symbol_id="len"`) with target-agnostic semantic representations: `op="sys_date"`, `op="sys_time"`, `op="counter"`, and `op="array_length"`.
+* Moved target-specific formatting of built-ins entirely into backend expression emitters.
+
+
+* **Target Backend Architecture (`codegen/target.py`)**:
+* Defined the abstract base contract `TargetBackend` requiring `emit_module(module, emit_main)` and `emit_schema(ddms)`.
+* Implemented dynamic target discovery and registration (`@register_target("python")`, `get_target()`) using `importlib` to avoid circular import issues during package startup.
+
+
+* **Python Target Relocation (`codegen/targets/python/`)**:
+* Relocated all Python-specific code generation components into `src/natural/codegen/targets/python/`:
+* `target.py`: Registered `PythonTarget` managing `.py` extensions, Python business logic compilation, and SQLAlchemy schema emission.
+* `context.py`, `engine.py`, `expressions.py`, `formatters.py`, `harvester.py`, `orm.py`, and `handlers/`.
+
+
+* Provided clean backward-compatibility shims (`src/natural/codegen/python_emitter.py`, `src/natural/codegen/orm_emitter.py`) to ensure zero call-site breakages.
+* Resolved circular import paths across `targets/python/harvester.py` and `targets/python/engine.py`.
+
+
+* **Orchestration & CLI Multi-Target Support (`builder.py`, `cli.py`)**:
+* Refactored `ProjectBuilder` to take a configurable `target` parameter (defaulting to `"python"`), dynamically retrieving backends via `get_target()`.
+* Partitioned compilation artifacts into target-specific directory trees (`build/<target>/`, e.g., `build/python/`).
+* Added `--target` / `-t` CLI options to `natural parse` and `natural build`.
+
+
+* **Tabulation Padding Guard (`targets/python/handlers/io.py`)**:
+* Reinstated `max(0, target_col - len(...))` clipping in `emit_write` for column tab calculations, matching golden-master snapshot contracts and preventing runtime negative string repetition exceptions.
+* Ensured all 41 test fixtures pass regression testing without code mismatches.

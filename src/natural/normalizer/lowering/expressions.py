@@ -60,13 +60,12 @@ class ExpressionLowerer:
                     arr_name = m.group(1).strip()
                     arr_id = self.ctx.resolve_ref(arr_name)
                     return SemanticExpression(
-                        op="func_call",
-                        symbol_id="len",
+                        op="array_length",
                         items=[SemanticExpression(op="ref", symbol_id=arr_id)],
                     )
                 return SemanticExpression(op="literal", value=0)
             elif var_name.startswith("*COUNTER"):
-                return SemanticExpression(op="counter", value="loop_counter")
+                return SemanticExpression(op="counter")
             elif var_name.startswith("*ISN"):
                 return SemanticExpression(op="ref", symbol_id="sym.entity.active.id")
             elif var_name.startswith("*NUMBER"):
@@ -75,9 +74,9 @@ class ExpressionLowerer:
                         return SemanticExpression(op="ref", symbol_id="record.number")
                 return SemanticExpression(op="literal", value=1)
             elif var_name in ("*DATX", "*DATN"):
-                return SemanticExpression(op="sys_date", value="date.today()")
+                return SemanticExpression(op="sys_date")
             elif var_name == "*TIME":
-                return SemanticExpression(op="sys_time", value="datetime.now().time()")
+                return SemanticExpression(op="sys_time")
             return SemanticExpression(op="literal", value=var_name)
         elif expr.kind == "binary_op":
             op_map = {

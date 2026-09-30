@@ -5,18 +5,17 @@
 import difflib
 import graphlib
 from pathlib import Path
-from typing import Dict, Set, List
+from typing import Dict, List, Set
 from rich.console import Console
 from rich.syntax import Syntax
 
-from natural.normalizer.pass1_parser import Pass1Parser
-from natural.normalizer.pass2_dispatcher import Pass2Dispatcher
-from natural.normalizer.lowering import SemanticLoweringPass
-from natural.normalizer.workspace import Workspace
+from natural.codegen.target import get_target
 from natural.ir.models import SubroutineDefinition
 from natural.ir.serializer import serialize_to_yaml
-from natural.codegen.python_emitter import PythonEmitter
-from natural.codegen.orm_emitter import ORMEmitter
+from natural.normalizer.lowering import SemanticLoweringPass
+from natural.normalizer.pass1_parser import Pass1Parser
+from natural.normalizer.pass2_dispatcher import Pass2Dispatcher
+from natural.normalizer.workspace import Workspace
 
 console = Console()
 
@@ -47,26 +46,11 @@ def write_if_changed(file_path: Path, new_content: str, show_diff: bool) -> bool
     return True
 
 
-FALLBACK_ORM_SOURCE = """from sqlalchemy import Column, Integer, String
-from sqlalchemy.orm import declarative_base
-
-Base = declarative_base()
-
-def __getattr__(name):
-    if name.startswith("__") and name.endswith("__"):
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    cls_dict = {
-        '__tablename__': name.lower(),
-        'id': Column('id', Integer, primary_key=True, autoincrement=True),
-        'name': Column('name', String(255), default=""),
-    }
-    return type(name, (Base,), cls_dict)
-"""
-
-
 class ProjectBuilder:
-    def __init__(self, workspace_dir: Path):
+    def __init__(self, workspace_dir: Path, target: str = "python"):
         self.workspace_dir = workspace_dir
+        self.target_name = target
+        self.backend = get_target(target)
         self.workspace = Workspace(include_dirs=[workspace_dir])
         self.parser = Pass1Parser(self.workspace)
         self.dispatcher = Pass2Dispatcher()
@@ -155,13 +139,13 @@ class ProjectBuilder:
         build_dir = self.workspace_dir / "build"
         ir0_dir = build_dir / "ir0"
         ir1_dir = build_dir / "ir1"
-        py_dir = build_dir / "python"
+        target_dir = build_dir / self.backend.target_name
 
-        for d in [ir0_dir, ir1_dir, py_dir]:
+        for d in [ir0_dir, ir1_dir, target_dir]:
             d.mkdir(parents=True, exist_ok=True)
 
         expected_files: Set[Path] = set()
-        console.print(f"\n[bold cyan]Build Order:[/bold cyan] {' -> '.join(build_order)}\n")
+        console.print(f"\n[bold cyan]Build Order ({self.backend.target_name}):[/bold cyan] {' -> '.join(build_order)}\n")
 
         for module_name in build_order:
             if module_name not in self.file_map:
@@ -189,30 +173,25 @@ class ProjectBuilder:
                 expected_files.add(ir1_out)
                 write_if_changed(ir1_out, serialize_to_yaml(ir1), show_diff)
 
-                py_emitter = PythonEmitter(ir1)
                 should_emit_main = emit_main and (ext == ".nsp")
-                py_source = py_emitter.generate(emit_main=should_emit_main)
-                py_out = py_dir / f"{module_name.lower()}.py"
-                expected_files.add(py_out)
-                write_if_changed(py_out, py_source, show_diff)
+                target_source = self.backend.emit_module(ir1, emit_main=should_emit_main)
+                target_out = target_dir / f"{module_name.lower()}{self.backend.file_extension}"
+                expected_files.add(target_out)
+                write_if_changed(target_out, target_source, show_diff)
 
             except Exception as e:
                 console.print(f"  [bold red]↳ Failed:[/bold red] {e}")
 
-        orm_out = py_dir / "target_orm.py"
-        expected_files.add(orm_out)
-
+        # Emit target schemas / ORM models
         ddms = [area for key, area in self.workspace._cache.items() if key.startswith("DDM_")]
-        if ddms:
-            console.print(f"\nCompiling [bold]TARGET_ORM[/bold]...")
-            orm_emitter = ORMEmitter(ddms)
-            orm_source = orm_emitter.generate()
-        else:
-            orm_source = FALLBACK_ORM_SOURCE
+        schema_outputs = self.backend.emit_schema(ddms)
+        for schema_relpath, schema_content in schema_outputs.items():
+            schema_out = target_dir / schema_relpath
+            expected_files.add(schema_out)
+            write_if_changed(schema_out, schema_content, show_diff)
 
-        write_if_changed(orm_out, orm_source, show_diff)
-
-        for d in [ir0_dir, ir1_dir, py_dir]:
+        # Clean stale files in the target directory
+        for d in [ir0_dir, ir1_dir, target_dir]:
             for file_path in d.glob("*"):
                 if file_path.is_file() and file_path not in expected_files:
                     file_path.unlink()

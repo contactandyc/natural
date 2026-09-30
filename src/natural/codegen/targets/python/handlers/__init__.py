@@ -37,7 +37,7 @@ from natural.ir.semantic import (
     WriteOp,
     WriteWorkFileOp,
 )
-from natural.codegen.python_emitter.handlers.control_flow import (
+from natural.codegen.targets.python.handlers.control_flow import (
     emit_branch,
     emit_break,
     emit_continue,
@@ -46,7 +46,7 @@ from natural.codegen.python_emitter.handlers.control_flow import (
     emit_return,
     emit_terminate,
 )
-from natural.codegen.python_emitter.handlers.database import (
+from natural.codegen.targets.python.handlers.database import (
     emit_at_break,
     emit_at_end,
     emit_at_start,
@@ -58,18 +58,18 @@ from natural.codegen.python_emitter.handlers.database import (
     emit_query_iteration,
     emit_transaction,
 )
-from natural.codegen.python_emitter.handlers.invocation import (
+from natural.codegen.targets.python.handlers.invocation import (
     emit_call_program,
     emit_call_subroutine,
     emit_fetch,
 )
-from natural.codegen.python_emitter.handlers.io import (
+from natural.codegen.targets.python.handlers.io import (
     emit_close_work_file,
     emit_read_work_file,
     emit_write,
     emit_write_work_file,
 )
-from natural.codegen.python_emitter.handlers.memory import (
+from natural.codegen.targets.python.handlers.memory import (
     emit_assign,
     emit_compress,
     emit_examine,

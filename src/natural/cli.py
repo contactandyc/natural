@@ -11,13 +11,12 @@ import typer
 from rich.console import Console
 from rich.syntax import Syntax
 
+from natural.codegen.target import get_target
+from natural.ir.serializer import serialize_to_yaml
+from natural.normalizer.lowering import SemanticLoweringPass
 from natural.normalizer.pass1_parser import Pass1Parser
 from natural.normalizer.pass2_dispatcher import Pass2Dispatcher
-from natural.normalizer.lowering import SemanticLoweringPass
 from natural.normalizer.workspace import Workspace
-from natural.ir.serializer import serialize_to_yaml
-from natural.codegen.python_emitter import PythonEmitter
-from natural.codegen.orm_emitter import ORMEmitter
 from natural.orchestrator.builder import ProjectBuilder
 
 app = typer.Typer(
@@ -33,9 +32,11 @@ def parse(
         include_dir: Optional[List[Path]] = typer.Option(None, "--include-dir", "-I", help="Directories to search for .NSA, .DDM, and copycodes"),
         output: Optional[Path] = typer.Option(None, "--output", "-o", help="Optional output file path"),
         display: bool = typer.Option(True, "--display/--no-display", help="Print the generated output to console"),
-        emit_python: bool = typer.Option(False, "--emit-python", "-p", help="Generate and print Python source code"),
-        emit_main: bool = typer.Option(False, "--emit-main", help="Include runnable __main__ block in emitted Python"),
-        emit_orm: bool = typer.Option(False, "--emit-orm", help="Generate SQLAlchemy ORM models from DDMs"),
+        target: str = typer.Option("python", "--target", "-t", help="Target language (e.g. python)"),
+        emit_code: bool = typer.Option(False, "--emit-code", "-c", help="Generate and print source code in target language"),
+        emit_python: bool = typer.Option(False, "--emit-python", "-p", help="Deprecated alias for --emit-code"),
+        emit_main: bool = typer.Option(False, "--emit-main", help="Include runnable __main__ block in emitted code"),
+        emit_orm: bool = typer.Option(False, "--emit-orm", help="Generate schema/ORM models from DDMs"),
 ):
     if not source_file.exists():
         console.print(f"[bold red]Error:[/bold red] File not found: {source_file}")
@@ -52,23 +53,17 @@ def parse(
         semantic_pass = SemanticLoweringPass(ir0_module, workspace=workspace)
         ir1_module = semantic_pass.lower()
 
+        backend = get_target(target)
+
         if emit_orm:
             ddms = [area for key, area in workspace._cache.items() if key.startswith("DDM_")]
-            if ddms:
-                orm_emitter = ORMEmitter(ddms)
-                result_text = orm_emitter.generate()
-            else:
-                result_text = (
-                    "from sqlalchemy.orm import declarative_base\n"
-                    "Base = declarative_base()\n\n"
-                    "def __getattr__(name):\n"
-                    "    return type(name, (Base,), {'__tablename__': name.lower()})\n"
-                )
-            lang = "python"
-        elif emit_python:
-            emitter = PythonEmitter(ir1_module)
-            result_text = emitter.generate(emit_main=emit_main or source_file.suffix.lower() == ".nsp")
-            lang = "python"
+            schemas = backend.emit_schema(ddms)
+            result_text = list(schemas.values())[0] if schemas else ""
+            lang = "python" if target == "python" else "text"
+        elif emit_code or emit_python:
+            should_emit_main = emit_main or source_file.suffix.lower() == ".nsp"
+            result_text = backend.emit_module(ir1_module, emit_main=should_emit_main)
+            lang = "python" if target == "python" else "text"
         else:
             result_text = serialize_to_yaml(ir1_module)
             lang = "yaml"
@@ -87,14 +82,15 @@ def parse(
 @app.command()
 def build(
         workspace_dir: Path = typer.Argument(..., help="Path to the Natural workspace directory"),
+        target: str = typer.Option("python", "--target", "-t", help="Target output language (e.g. python)"),
         show_diff: bool = typer.Option(False, "--diff", help="Show Git-style diffs for output files that have changed"),
-        emit_main: bool = typer.Option(True, "--emit-main/--no-emit-main", help="Emit runnable if __name__ == '__main__' into .nsp outputs"),
+        emit_main: bool = typer.Option(True, "--emit-main/--no-emit-main", help="Emit runnable entry points into .nsp outputs"),
 ):
     if not workspace_dir.is_dir():
         console.print(f"[bold red]Error:[/bold red] Workspace directory not found: {workspace_dir}")
         raise typer.Exit(code=1)
 
-    builder = ProjectBuilder(workspace_dir)
+    builder = ProjectBuilder(workspace_dir, target=target)
     builder.compile_workspace(show_diff=show_diff, emit_main=emit_main)
 
 
@@ -109,7 +105,7 @@ def run(
 
     if not target_py.exists():
         console.print(f"[bold yellow]Module not found at {target_py}. Building workspace first...[/bold yellow]")
-        builder = ProjectBuilder(workspace_dir)
+        builder = ProjectBuilder(workspace_dir, target="python")
         builder.compile_workspace(show_diff=False, emit_main=True)
 
     if not target_py.exists():

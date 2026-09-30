@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
-from natural.codegen.targets.python.orm import FALLBACK_ORM_SOURCE, ORMEmitter
+from natural.codegen.target import TargetBackend, get_target, register_target
 
-__all__ = ["ORMEmitter", "FALLBACK_ORM_SOURCE"]
+__all__ = [
+    "TargetBackend",
+    "get_target",
+    "register_target",
+]
