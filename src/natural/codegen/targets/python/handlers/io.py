@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
-from typing import List, Tuple
 from natural.ir.semantic import (
     CloseWorkFileOp,
     ReadWorkFileOp,
@@ -39,48 +38,13 @@ def emit_write(
             parts = [expr_emitter.emit_expr(e) for e in line_ops]
             ctx.emit_line(f"print({', '.join(parts)})")
         else:
-            code_parts = []
-            sim_parts: List[Tuple[str, str]] = []
-
+            items = []
             for e in line_ops:
                 if e.op == "tab":
-                    target_col = max(0, int(e.value) - 1)
-                    if not sim_parts:
-                        if target_col > 0:
-                            code_parts.append(f'" " * {target_col}')
-                            sim_parts.append(("literal", " " * target_col))
-                    else:
-                        if all(kind == "literal" for kind, _ in sim_parts):
-                            sim_str = "".join(val for _, val in sim_parts)
-                            code_parts.append(f'" " * max(0, {target_col} - len("{sim_str}"))')
-                            curr_len = len(sim_str)
-                            diff = max(0, target_col - curr_len)
-                            sim_parts.append(("literal", " " * diff))
-                        else:
-                            len_terms = []
-                            for kind, val in sim_parts:
-                                if kind == "literal":
-                                    len_terms.append(f'"{val}"')
-                                else:
-                                    len_terms.append(val)
-                            sim_expr = " + ".join(len_terms)
-                            code_parts.append(f'" " * max(0, {target_col} - len({sim_expr}))')
-                            sim_parts.append(("expr", f'" " * max(0, {target_col} - len({sim_expr}))'))
+                    items.append(f"tab({e.value})")
                 else:
-                    if e.op == "literal" and isinstance(e.value, str):
-                        code_parts.append(f'"{e.value}"')
-                        sim_parts.append(("literal", e.value))
-                    elif e.op == "literal":
-                        val_str = str(e.value)
-                        code_parts.append(repr(e.value))
-                        sim_parts.append(("literal", val_str))
-                    else:
-                        expr_code = expr_emitter.emit_expr(e)
-                        code_parts.append(f"str({expr_code})")
-                        sim_parts.append(("expr", f"str({expr_code})"))
-
-            line_code = " + ".join(code_parts)
-            ctx.emit_line(f"print({line_code})")
+                    items.append(expr_emitter.emit_expr(e))
+            ctx.emit_line(f"print(tabulate({', '.join(items)}))")
 
 
 def emit_write_work_file(

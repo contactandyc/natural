@@ -44,7 +44,7 @@ case "$COMMAND" in
     echo "✅ CLI linked to $HOME/.local/bin/natural. You can run 'natural' from anywhere!"
     ;;
 
-  test|bless)
+  test|bless|evaluate)
     if [ ! -d "venv" ]; then
         "$0" install
     fi
@@ -53,6 +53,8 @@ case "$COMMAND" in
     pytest_args=()
     if [ "$COMMAND" = "bless" ]; then
         pytest_args+=("--bless")
+    elif [ "$COMMAND" = "evaluate" ]; then
+        pytest_args+=("--evaluate")
     fi
 
     filter_terms=()

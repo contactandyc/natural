@@ -100,6 +100,7 @@ def serialize_fixture(
 @pytest.mark.parametrize("fixture_path", list(FIXTURE_DIR.glob("*.test")), ids=lambda p: p.stem)
 def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
     bless_enabled = request.config.getoption("--bless", default=False)
+    evaluate_enabled = request.config.getoption("--evaluate", default=False)
     verbose_enabled = request.config.getoption("--verbose-test", default=False)
     content = fixture_path.read_text(encoding="utf-8")
 
@@ -115,7 +116,7 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
     for fname, n_src in natural_files.items():
         (tmp_path / fname).write_text(n_src, encoding="utf-8")
 
-    builder = ProjectBuilder(tmp_path)
+    builder = ProjectBuilder(tmp_path, target="python")
     builder.compile_workspace(show_diff=False, emit_main=False)
 
     py_dir = tmp_path / "build" / "python"
@@ -172,9 +173,14 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
                 has_exp_py or len(relevant_py_files) > 1,
                 )
             fixture_path.write_text(new_content, encoding="utf-8")
-        else:
+        elif not evaluate_enabled:
             diff_report = "\n\n".join(diffs)
             assert False, f"Code generation mismatch in {fixture_path.name}:\n{diff_report}"
+        else:
+            if verbose_enabled:
+                console.print(
+                    f"[yellow]Notice: Emitted code differs from snapshot in {fixture_path.name} (evaluating behavior)[/yellow]"
+                )
 
     if not execute_yaml:
         return
@@ -206,9 +212,32 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
     if py_dir_str not in sys.path:
         sys.path.insert(0, py_dir_str)
 
-    for stem in module_stems | {"target_orm"}:
-        if stem in sys.modules:
-            del sys.modules[stem]
+    # Evict cached test and runtime modules for an isolated run
+    for mod_name in list(sys.modules.keys()):
+        if (
+                mod_name in module_stems
+                or mod_name == "target_orm"
+                or mod_name == "natural_runtime"
+                or mod_name.startswith("natural_runtime.")
+        ):
+            del sys.modules[mod_name]
+
+    # Harvest column types from target_orm to coerce mock records into proper Python types
+    col_types = {}
+    if (py_dir / "target_orm.py").exists():
+        try:
+            target_orm_mod = importlib.import_module("target_orm")
+            for attr_name in dir(target_orm_mod):
+                attr = getattr(target_orm_mod, attr_name)
+                if isinstance(attr, type) and hasattr(attr, "__table__"):
+                    for col in attr.__table__.columns:
+                        try:
+                            norm_name = col.name.lower().replace("-", "_").replace("#", "")
+                            col_types[norm_name] = col.type.python_type
+                        except (NotImplementedError, AttributeError):
+                            pass
+        except Exception:
+            pass
 
     entrypoint_mod = importlib.import_module(entrypoint_stem)
 
@@ -265,20 +294,27 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
         console.print(f"[bold cyan]5. Executing Test Cases against '{entrypoint_stem}.py':[/bold cyan]")
 
     for i, case in enumerate(test_cases, 1):
+        records = []
+        for r in case.get("records", []):
+            coerced_r = dict(r)
+            for k, val in r.items():
+                norm_k = k.lower().replace("-", "_").replace("#", "")
+                expected_type = col_types.get(norm_k)
+                if expected_type is Decimal and not isinstance(val, Decimal):
+                    try:
+                        coerced_r[k] = Decimal(str(val))
+                    except Exception:
+                        pass
+                elif expected_type is int and not isinstance(val, int):
+                    try:
+                        coerced_r[k] = int(val)
+                    except Exception:
+                        pass
+                elif expected_type is bool and not isinstance(val, bool):
+                    coerced_r[k] = str(val).lower() in ("true", "1", "yes", "t")
+            records.append(type("Record", (), coerced_r)())
 
-        # --- FIX: Type cast numeric strings/floats to Decimal for the mock ORM records ---
-        mock_records = []
-        for r_dict in case.get("records", []):
-            rec = type("Record", (), {})()
-            for k, v in r_dict.items():
-                if isinstance(v, float) or (isinstance(v, str) and re.match(r"^-?\d+\.\d+$", v)):
-                    setattr(rec, k, Decimal(str(v)))
-                else:
-                    setattr(rec, k, v)
-            mock_records.append(rec)
-
-        session = MockSession(mock_records)
-
+        session = MockSession(records)
         ctx = ctx_class()
         for field, val in case.get("input", {}).items():
             default_val = getattr(ctx, field, None)

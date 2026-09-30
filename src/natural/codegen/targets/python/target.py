@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
+from pathlib import Path
 from typing import Dict, List
 from natural.codegen.target import TargetBackend, register_target
 from natural.codegen.targets.python.engine import PythonEmitter
@@ -24,3 +25,12 @@ class PythonTarget(TargetBackend):
             orm_emitter = ORMEmitter(ddms)
             return {"target_orm.py": orm_emitter.generate()}
         return {"target_orm.py": FALLBACK_ORM_SOURCE}
+
+    def emit_runtime(self) -> Dict[str, str]:
+        runtime_dir = Path(__file__).parent / "runtime"
+        outputs = {}
+        if runtime_dir.is_dir():
+            for p in runtime_dir.rglob("*.py"):
+                rel = p.relative_to(runtime_dir)
+                outputs[f"natural_runtime/{rel}"] = p.read_text(encoding="utf-8")
+        return outputs

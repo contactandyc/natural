@@ -22,11 +22,12 @@ class TargetBackend(ABC):
 
     @abstractmethod
     def emit_schema(self, ddms: List[DataAreaRef]) -> Dict[str, str]:
-        """Emits data schema / ORM files from DDMs.
+        """Emits data schema / ORM files from DDMs (relative_path -> file_content)."""
+        ...
 
-        Returns a dictionary mapping relative file paths to file contents.
-        Example: {"target_orm.py": "..."}
-        """
+    @abstractmethod
+    def emit_runtime(self) -> Dict[str, str]:
+        """Emits target runtime library files (relative_path -> file_content)."""
         ...
 
 
@@ -45,7 +46,6 @@ def get_target(name: str = "python") -> TargetBackend:
     """Instantiates a target backend by name."""
     key = name.lower()
     if key not in TARGET_REGISTRY:
-        # Dynamically import the target module to trigger @register_target
         importlib.import_module(f"natural.codegen.targets.{key}.target")
 
     cls = TARGET_REGISTRY.get(key)

@@ -775,3 +775,49 @@ Decoupled the compiler frontend and semantic lowering passes from Python-specifi
 * **Tabulation Padding Guard (`targets/python/handlers/io.py`)**:
 * Reinstated `max(0, target_col - len(...))` clipping in `emit_write` for column tab calculations, matching golden-master snapshot contracts and preventing runtime negative string repetition exceptions.
 * Ensured all 41 test fixtures pass regression testing without code mismatches.
+
+
+--- 
+
+---
+
+# Chat - Target Runtime Library & Semantic Evaluation Runner - https://share.gemini.google/0xnDHeTck1mR
+
+Introduced modular target runtime libraries (`targets/<lang>/runtime/`), refactored Python code generation to offload complex mainframe emulation logic to `natural_runtime`, added the `./build.sh evaluate` command for semantic behavior verification, and automated mock database record type coercion.
+
+---
+
+### Summary of Changes
+
+* **Target Runtime Architecture (`codegen/target.py`, `targets/python/runtime/`)**:
+* Added `emit_runtime()` to the `TargetBackend` protocol, enabling targets to emit self-contained runtime utility packages into build outputs (`build/<target>/natural_runtime/`).
+* Implemented the modular Python target runtime package (`src/natural/codegen/targets/python/runtime/`):
+* **`unmask.py`**: `unmask_decimal()` and `unmask_integer()` parsing currency symbols, commas, trailing negative signs, accounting suffixes (`CR`, `DB`), and parenthesized numbers.
+* **`tabulation.py`**: `tab()` and `tabulate()` calculating dynamic character column positions and alignment whitespace at runtime.
+* **`slicing.py`**: `slice_assign()` managing 1-based offset and length substring write splices.
+* **`arrays.py`**: `expand_array()`, `reduce_array()`, and `resize_array()` managing dynamic array allocation lifecycles.
+* **`__init__.py`**: Re-exports all public runtime helpers under `natural_runtime`.
+
+
+
+
+* **Codegen Handler Simplification (`targets/python/handlers/`, `harvester.py`)**:
+* Replaced inline string manipulation boilerplate with clean runtime calls:
+* `AssignOp` with substring targets now emits `slice_assign(...)`.
+* `AssignOp` string-to-numeric unmasking now emits `unmask_decimal(...)` or `unmask_integer(...)`.
+* `ResizeArrayOp` now emits `expand_array(...)`, `reduce_array(...)`, or `resize_array(...)`.
+* `WriteOp` with column tab stops now emits `print(tabulate(...))` with `tab(col)` tokens.
+
+
+* Updated `ImportHarvester` to inspect AST operations and automatically generate `from natural_runtime import ...` statements for referenced utilities.
+
+
+* **Semantic Evaluation Runner (`build.sh`, `tests/conftest.py`, `tests/test_fixtures.py`)**:
+* Added the `./build.sh evaluate` subcommand and the `--evaluate` pytest option.
+* Decoupled semantic execution validation from syntactic snapshot diffs: allows verifying that emitted programs pass all `=== EXECUTE ===` assertions even when code generation changes, avoiding blind `./build.sh bless` calls.
+
+
+* **Mock Record Type Coercion (`tests/test_fixtures.py`)**:
+* Automated reflection of SQLAlchemy column types from generated `target_orm.py` in the test harness.
+* Coerces raw string fixture inputs on mock database records into `Decimal`, `int`, and `bool` instances to prevent runtime `TypeError` mismatches during filtering and arithmetic checks.
+

@@ -36,14 +36,12 @@ def emit_assign(
 
     if op.target_substring:
         start_val = expr_emitter.emit_expr(op.target_substring.start)
-        s_idx = f"({start_val} - 1)"
-        rhs_val = f"str({expr_emitter.emit_expr(op.expr)})"
+        rhs_val = expr_emitter.emit_expr(op.expr)
         if op.target_substring.length:
             len_val = expr_emitter.emit_expr(op.target_substring.length)
-            e_idx = f"({s_idx} + {len_val})"
-            ctx.emit_line(f"{target} = {target}[:{s_idx}] + {rhs_val} + {target}[{e_idx}:]")
+            ctx.emit_line(f"{target} = slice_assign({target}, {start_val}, {len_val}, {rhs_val})")
         else:
-            ctx.emit_line(f"{target} = {target}[:{s_idx}] + {rhs_val}")
+            ctx.emit_line(f"{target} = slice_assign({target}, {start_val}, None, {rhs_val})")
         return
 
     if op.edit_mask and target_sym and source_sym:
@@ -62,25 +60,16 @@ def emit_assign(
             return
         elif target_sym.semantic_type.base in ("decimal", "numeric") and source_sym.semantic_type.base == "string":
             src_ref = ctx.resolve_ref(op.expr.symbol_id)
-            ctx.emit_line(f"_val = {src_ref}.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')")
-            ctx.emit_line(f"_is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))")
-            ctx.emit_line(f"_num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()")
-            ctx.emit_line(f"{target} = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))")
+            ctx.emit_line(f"{target} = unmask_decimal({src_ref})")
             return
         elif target_sym.semantic_type.base == "integer" and source_sym.semantic_type.base == "string":
             src_ref = ctx.resolve_ref(op.expr.symbol_id)
-            ctx.emit_line(f"_val = {src_ref}.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')")
-            ctx.emit_line(f"_is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))")
-            ctx.emit_line(f"_num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()")
-            ctx.emit_line(f"{target} = -int(_num) if _is_neg else (int(_num) if _num else 0)")
+            ctx.emit_line(f"{target} = unmask_integer({src_ref})")
             return
 
     if target_sym and target_sym.semantic_type.base in ("decimal", "numeric") and source_sym and source_sym.semantic_type.base == "string":
         src_ref = ctx.resolve_ref(op.expr.symbol_id)
-        ctx.emit_line(f"_val = {src_ref}.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')")
-        ctx.emit_line(f"_is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))")
-        ctx.emit_line(f"_num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()")
-        ctx.emit_line(f"{target} = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))")
+        ctx.emit_line(f"{target} = unmask_decimal({src_ref})")
         return
 
     expr = expr_emitter.emit_expr(op.expr)
@@ -193,15 +182,8 @@ def emit_resize_array(
     target = ctx.resolve_ref(op.target_id)
     size = expr_emitter.emit_expr(op.size)
     if op.action == "EXPAND":
-        ctx.emit_line(f"_diff = max(0, int({size}) - len({target}))")
-        ctx.emit_line(f"{target}.extend([None] * _diff)")
+        ctx.emit_line(f"expand_array({target}, {size})")
     elif op.action == "REDUCE":
-        ctx.emit_line(f"del {target}[int({size}):]")
+        ctx.emit_line(f"reduce_array({target}, {size})")
     else:
-        ctx.emit_line(f"if int({size}) < len({target}):")
-        with ctx.indent():
-            ctx.emit_line(f"del {target}[int({size}):]")
-        ctx.emit_line("else:")
-        with ctx.indent():
-            ctx.emit_line(f"_diff = max(0, int({size}) - len({target}))")
-            ctx.emit_line(f"{target}.extend([None] * _diff)")
+        ctx.emit_line(f"resize_array({target}, {size})")

@@ -1,6 +1,4 @@
 # tests/conftest.py
-# SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
-# SPDX-License-Identifier: Apache-2.0
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -8,6 +6,12 @@ def pytest_addoption(parser):
         action="store_true",
         default=False,
         help="Update fixture === PYTHON === sections with compiler output",
+    )
+    parser.addoption(
+        "--evaluate",
+        action="store_true",
+        default=False,
+        help="Skip syntactic snapshot diff failures and assert behavioral execution only",
     )
     parser.addoption(
         "--verbose-test",

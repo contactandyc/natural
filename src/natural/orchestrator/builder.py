@@ -190,10 +190,25 @@ class ProjectBuilder:
             expected_files.add(schema_out)
             write_if_changed(schema_out, schema_content, show_diff)
 
+        # Emit target runtime libraries
+        runtime_outputs = self.backend.emit_runtime()
+        for runtime_relpath, runtime_content in runtime_outputs.items():
+            runtime_out = target_dir / runtime_relpath
+            runtime_out.parent.mkdir(parents=True, exist_ok=True)
+            expected_files.add(runtime_out)
+            write_if_changed(runtime_out, runtime_content, show_diff)
+
         # Clean stale files in the target directory
-        for d in [ir0_dir, ir1_dir, target_dir]:
-            for file_path in d.glob("*"):
-                if file_path.is_file() and file_path not in expected_files:
-                    file_path.unlink()
+        for file_path in target_dir.rglob("*"):
+            if file_path.is_file() and file_path not in expected_files:
+                file_path.unlink()
+
+        for file_path in ir0_dir.glob("*"):
+            if file_path.is_file() and file_path not in expected_files:
+                file_path.unlink()
+
+        for file_path in ir1_dir.glob("*"):
+            if file_path.is_file() and file_path not in expected_files:
+                file_path.unlink()
 
         console.print(f"\n[bold green]Workspace build complete.[/bold green] Output saved to {build_dir}")

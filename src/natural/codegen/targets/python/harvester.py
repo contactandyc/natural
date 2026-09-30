@@ -12,13 +12,15 @@ from natural.ir.semantic import (
     FetchOp,
     QueryIterationOp,
     ReadWorkFileOp,
+    ResizeArrayOp,
     TerminateOp,
+    WriteOp,
 )
 from natural.codegen.targets.python.context import EmitterContext
 
 
 class ImportHarvester:
-    """Harvests standard library, SQLAlchemy, ORM entity, and inter-module dependencies."""
+    """Harvests standard library, SQLAlchemy, runtime, ORM, and inter-module dependencies."""
 
     def __init__(self, ctx: EmitterContext):
         self.ctx = ctx
@@ -31,6 +33,15 @@ class ImportHarvester:
         needs_date = False
         needs_datetime = False
         needs_timedelta = False
+
+        needs_unmask_decimal = False
+        needs_unmask_integer = False
+        needs_slice_assign = False
+        needs_expand_array = False
+        needs_reduce_array = False
+        needs_resize_array = False
+        needs_tabulate = False
+        needs_tab = False
 
         for sym in self.ctx.module.symbols.values():
             if sym.scope == "entity_field":
@@ -72,16 +83,36 @@ class ImportHarvester:
 
         def scan_ops(ops):
             nonlocal needs_os, needs_sys, needs_decimal, needs_round_half_up, needs_date, needs_datetime
+            nonlocal needs_unmask_decimal, needs_unmask_integer, needs_slice_assign
+            nonlocal needs_expand_array, needs_reduce_array, needs_resize_array
+            nonlocal needs_tabulate, needs_tab
+
             for op in ops:
                 if isinstance(op, ReadWorkFileOp):
                     needs_os = True
                 if isinstance(op, TerminateOp):
                     needs_sys = True
+                if isinstance(op, WriteOp):
+                    if any(e.op == "tab" for e in op.operands):
+                        needs_tabulate = True
+                        needs_tab = True
+                if isinstance(op, ResizeArrayOp):
+                    if op.action == "EXPAND":
+                        needs_expand_array = True
+                    elif op.action == "REDUCE":
+                        needs_reduce_array = True
+                    else:
+                        needs_resize_array = True
                 if isinstance(op, AssignOp):
+                    if op.target_substring:
+                        needs_slice_assign = True
                     target_sym = self.ctx.get_symbol(op.target_id)
                     source_sym = self.ctx.get_symbol(op.expr.symbol_id) if op.expr.symbol_id else None
                     if target_sym and target_sym.semantic_type.base in ("decimal", "numeric") and source_sym and source_sym.semantic_type.base == "string":
-                        needs_decimal = True
+                        needs_unmask_decimal = True
+                    elif target_sym and target_sym.semantic_type.base == "integer" and source_sym and source_sym.semantic_type.base == "string":
+                        needs_unmask_integer = True
+
                     if op.rounded:
                         if target_sym and target_sym.semantic_type.base == "decimal":
                             needs_decimal = True
@@ -140,6 +171,27 @@ class ImportHarvester:
 
         if datetime_parts:
             import_lines.append(f"from datetime import {', '.join(sorted(datetime_parts))}")
+
+        runtime_imports = []
+        if needs_expand_array:
+            runtime_imports.append("expand_array")
+        if needs_reduce_array:
+            runtime_imports.append("reduce_array")
+        if needs_resize_array:
+            runtime_imports.append("resize_array")
+        if needs_slice_assign:
+            runtime_imports.append("slice_assign")
+        if needs_tab:
+            runtime_imports.append("tab")
+        if needs_tabulate:
+            runtime_imports.append("tabulate")
+        if needs_unmask_decimal:
+            runtime_imports.append("unmask_decimal")
+        if needs_unmask_integer:
+            runtime_imports.append("unmask_integer")
+
+        if runtime_imports:
+            import_lines.append(f"from natural_runtime import {', '.join(sorted(runtime_imports))}")
 
         return import_lines
 
