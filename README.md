@@ -4,11 +4,17 @@ This is based on a many [chats with gemini](CHATS.md).
 
 ---
 
-A deterministic compilation and code-generation framework designed to migrate legacy Software AG Natural applications into typed modern programming languages (Python/SQLAlchemy, TypeScript/Node, and future targets).
+A deterministic compiler and semantic lowering framework designed to migrate legacy Software AG Natural applications into typed modern programming languages (Python/SQLAlchemy, TypeScript/Node, and future targets).
 
-Instead of relying on fragile regex replacements or heuristic text rewriting, this compiler follows an LLVM-style architecture: it parses Natural source code into a syntactic Abstract Syntax Tree (IR0), lowers it into a target-agnostic Semantic Intermediate Representation (IR1), and emits idiomatic, typed business logic and schema definitions through pluggable language backends paired with self-contained target runtime libraries.
+Instead of relying on fragile regex replacements or text transpilation, this compiler follows an LLVM-style multi-pass pipeline: it parses Natural source code into a syntactic Abstract Syntax Tree (IR0) using Context-Free Grammars, lowers it into a strictly typed, target-agnostic Semantic Intermediate Representation (IR1) with bottom-up type synthesis and explicit `CastOp` nodes, and emits idiomatic, typed code and schemas through pluggable language backends paired with self-contained target runtime libraries.
 
-It includes a topological DAG workspace builder, a multi-target backend protocol, a comprehensive 41-suite golden-master test framework, and a dual-track testing engine supporting semantic behavioral evaluation (`evaluate`) alongside syntactic snapshot blessing (`bless`).
+Key features include:
+- **Lark-Powered Context-Free Micro-Parsers**: Zero regex in statement parsing; all statement payloads and expressions share unified grammars.
+- **Strict Semantic Type Synthesis & Explicit Cast Insertion**: Every IR1 expression node carries its synthesized `SemanticType`, with explicit `CastOp` operations (`WIDEN`, `NARROW`, `UNMASK`, `EDIT_MASK`, `PARSE_DATE`, `FORMAT_DATE`, `STRINGIFY`) decoupling backend emitters from type guesswork.
+- **Pluggable Target Backend Architecture**: Standardized `TargetBackend` protocol separating IR1 semantic lowering from target language syntax generation.
+- **Modular Target Runtimes (`natural_runtime`)**: Self-contained runtime libraries emitted alongside compiled code to absorb mainframe arithmetic precision, edit masks, dynamic arrays, string slicing, and column tabulation.
+- **Topological DAG Workspace Builder**: Resolves cross-module dependencies (`CALLNAT`, `FETCH`, `USING`, copycodes, views) and builds modules in dependency order.
+- **Comprehensive Golden-Master Test Framework**: Supports multi-test and multi-module `.test` files, in-memory execution via a chained mock database engine, behavioral evaluation (`evaluate`), and non-destructive snapshot blessing (`bless`).
 
 ---
 
@@ -74,9 +80,9 @@ def execute_bonuscalc(ctx: BonuscalcContext, session):
 
 ---
 
-## Compiler Architecture
+## Compiler Pipeline
 
-The compiler strictly decouples source language frontend parsing, intermediate semantic normalization, target code generation, and target runtime execution:
+The compiler decouples frontend lexical parsing, intermediate semantic lowering, target code generation, and runtime emulation:
 
 ```
                   ┌─────────────────────────────────────────┐
@@ -84,7 +90,7 @@ The compiler strictly decouples source language frontend parsing, intermediate s
                   │        (.nsp, .nsn, .nsa, .ddm)         │
                   └────────────────────┬────────────────────┘
                                        │
-                       Preprocessor (Includes & Comments)
+                        Preprocessor (Includes & Comments)
                                        │
                                        ▼
                   ┌─────────────────────────────────────────┐
@@ -94,16 +100,16 @@ The compiler strictly decouples source language frontend parsing, intermediate s
                                        │ Block Boundaries & Raw Clauses
                                        ▼
                   ┌─────────────────────────────────────────┐
-                  │       Pass 2: Statement Dispatcher      │
-                  │          (pass2_dispatcher.py)          │
+                  │      Pass 2: Statement Dispatcher       │
+                  │         (CFG Lark Micro-Parsers)        │
                   └────────────────────┬────────────────────┘
                                        │ Syntactic AST (IR0)
                                        ▼
                   ┌─────────────────────────────────────────┐
                   │        Pass 3: Semantic Lowering        │
-                  │   (lowering/ context, exprs, handlers)  │
+                  │   Type Inference & Explicit CastOps     │
                   └────────────────────┬────────────────────┘
-                                       │ Target-Agnostic Semantic DAG (IR1)
+                                       │ Typed Semantic DAG (IR1)
                                        ▼
                   ┌─────────────────────────────────────────┐
                   │         Pass 4: Target Backend          │
@@ -115,39 +121,17 @@ The compiler strictly decouples source language frontend parsing, intermediate s
        ┌───────────────┐   ┌───────────┐ ┌───────────────┐   ┌───────────┐
        │ Python Target │   │  Runtime  │ │  TypeScript   │   │  Runtime  │
        │ (Logic + ORM) │   │ (Package) │ │ Target (Plan) │   │ (Package) │
+       │ (Logic + ORM) │   │ (Package) │ │ Target (Plan) │   │ (Package) │
        └───────────────┘   └───────────┘ └───────────────┘   └───────────┘
 
 ```
 
 1. **Pass 1: Island Grammar (`pass1_island.lark`):** Isolates high-level language blocks (`FIND`, `READ`, `HISTOGRAM`, `IF`, `REPEAT`, `FOR`, `DECIDE`, `DEFINE DATA`, `DEFINE SUBROUTINE`, `DEFINE FUNCTION`, `ON ERROR`, `AT BREAK`, `AT START/END`) from statement payloads.
-2. **Pass 2: Specialized Statement Dispatcher (`pass2_dispatcher.py`):** Routes block statements and clauses to specialized micro-parsers (`assign_parser`, `math_parser`, `string_parser`, `database_parser`, `io_parser`, `workfile_parser`, `decide_parser`, etc.) to produce the Syntactic AST (IR0).
-3. **Pass 3: Semantic Lowering (`lowering/`):** Resolves symbols, parameters, and inline view definitions against external DDMs/NSAs. Uses an isolated `ExpressionLowerer` and registry-based statement handlers (`handlers/database`, `handlers/memory`, `handlers/control_flow`, `handlers/invocation`, `handlers/io`) to emit a pure, target-agnostic Semantic DAG (IR1).
-4. **Pass 4: Pluggable Target Backends (`codegen/target.py`):** A unified `TargetBackend` protocol routes IR1 modules to language-specific emitters (`targets/python`, `targets/typescript`, etc.).
-5. **Target Runtime Libraries (`targets/<lang>/runtime/`):** Self-contained support libraries emitted directly into workspace builds (`build/<target>/natural_runtime/`) that absorb complex mainframe semantics (accounting edit masks, sign unmasking, substring splices, column tab alignment, dynamic array resizing) without polluting emitted business logic.
-6. **Project Builder (`orchestrator/builder.py`):** Discovers all module dependencies, constructs a topological DAG via `graphlib.TopologicalSorter`, coordinates multi-module compilation for selected targets, and manages clean build artifacts.
-
----
-
-## Multi-Target Backend Architecture
-
-### Design Principles
-
-1. **Target-Agnostic IR1:** The semantic intermediate representation contains zero language-specific keywords, library names, or syntax strings (e.g. system variables resolve to abstract semantic tokens like `op="sys_date"`, `op="counter"`, or `op="array_length"`).
-2. **Target Backend Contract:** Every backend implements `TargetBackend`:
-* `emit_module(module, emit_main)`: Emits executable business logic.
-* `emit_schema(ddms)`: Emits data models / ORM entities from DDM definitions.
-* `emit_runtime()`: Emits the target's self-contained support runtime.
-
-
-3. **Shared Codegen Infrastructure:** Shared utilities in `codegen/common/` (`CodeWriter`, Python/JS keyword escaping, PascalCase/snake_case helpers) eliminate boilerplate across emitters.
-
-### Target Support Matrix
-
-| Target Language | Status | Data Layer | Runtime Library | Execution Model |
-| --- | --- | --- | --- | --- |
-| **Python** | **Complete (Default)** | SQLAlchemy Declarative Base | `natural_runtime/` (unmask, tabulation, slicing, arrays) | In-memory via `MockSession` or standalone CLI (`--emit-main`) |
-| **TypeScript** | *Under Development* | Prisma / Drizzle / Interface Schemas | `natural_runtime/` (`.ts` utilities via `Decimal.js`) | Node/TSX execution runner |
-| **Go / Java / C#** | *Architecture-Ready* | Native SQL / GORM / EF Core | Target Runtime Package | Native compiled binaries / classes |
+2. **Pass 2: Statement Dispatcher (`pass2_dispatcher.py`):** Parses raw statement clauses using specialized Lark grammars sharing `SHARED_EXPR_GRAMMAR` (eliminating brittle regular expressions) to produce the Syntactic AST (IR0).
+3. **Pass 3: Semantic Lowering (`lowering/`):** Resolves symbols, parameters, and inline view definitions against external DDMs/NSAs. Synthesizes `SemanticType` bottom-up on all expressions, normalizes implicit mainframe coercions into explicit `CastOp` nodes (`wrap_cast`), and generates a pure, target-agnostic Semantic DAG (IR1).
+4. **Pass 4: Pluggable Target Backends (`codegen/target.py`):** Dispatches IR1 modules to language-specific emitters (`targets/python`, `targets/typescript`, etc.) implementing the `TargetBackend` protocol. Emitters translate explicit `CastOp` nodes directly without guessing types.
+5. **Target Runtime Libraries (`targets/<lang>/runtime/`):** Self-contained support libraries emitted directly into workspace builds (`build/<target>/natural_runtime/`) that absorb mainframe-specific behaviors (sign unmasking, financial edit masks, substring splices, column tab alignment, dynamic array resizing) without polluting business logic.
+6. **Project Builder (`orchestrator/builder.py`):** Discovers module dependencies, constructs a topological DAG via `graphlib.TopologicalSorter`, coordinates multi-module compilation, and cleans stale build artifacts.
 
 ---
 
@@ -164,7 +148,22 @@ The compiler strictly decouples source language frontend parsing, intermediate s
 * **Transaction Control:** `END TRANSACTION` (`session.commit()`) and `BACKOUT TRANSACTION` (`session.rollback()`).
 * **Control Break Processing:** `AT BREAK (field)` and `BEFORE BREAK PROCESSING` boundary detectors tracking previous iteration state.
 
-### 2. Schema, Arrays & Complex Types
+### 2. Strict Type Inference & Explicit Coercion (`CastOp`)
+
+* **Synthesized Semantic Types:** Every IR1 expression node computes and retains its inferred `SemanticType` (base type, precision, scale, length).
+* **Explicit `CastOp` Insertion:** Implicit Natural type coercions are converted during lowering into explicit `CastOp` nodes carrying a designated `CastKind`:
+* `WIDEN`: Lossless integer-to-decimal promotion (`Decimal(val)`).
+* `NARROW`: Decimal/division-to-integer truncation (`int(val)`).
+* `UNMASK`: Alphanumeric-to-numeric extraction parsing currency symbols, commas, trailing signs, `CR`/`DB` suffixes, and accounting parentheses.
+* `EDIT_MASK`: Formatting numeric expressions into structured strings with padding, thousands commas, and sign indicators.
+* `PARSE_DATE` / `FORMAT_DATE`: Bidirectional date transformations (`strptime`/`strftime`) driven by edit masks (`(EM=YYYYMMDD)`).
+* `STRINGIFY`: Primitive-to-string canonical stringification (`str(val)`).
+* `BOOL_COERCE`: Logical evaluation into target boolean types.
+
+
+* **Function Return Coercion:** Return statements in `DEFINE FUNCTION ... RETURNS (...)` automatically wrap evaluated expressions into the declared return type.
+
+### 3. Schema, Arrays & Complex Types
 
 * **Adabas Complex Fields:** Periodic groups (`PE`) and Multiple-value (`MU`) fields compiled into typed JSON columns with dynamic default initializers.
 * **1D & 2D Array Subscripts:** 1-based subscript translation (`LANG(1.1)`) converted to 0-based indexing (`record.lang[0][0]`).
@@ -174,7 +173,7 @@ The compiler strictly decouples source language frontend parsing, intermediate s
 * **Memory Redefinition (`REDEFINE`):** Overlaid variables lowered into zero-copy, typed `@property` getters and setters with character-level slice splices.
 * **Inline Views:** Full scoping of `VIEW OF <DDM>` blocks declared inside `DEFINE DATA`.
 
-### 3. Program Invocation & Modular Architecture
+### 4. Program Invocation & Modular Architecture
 
 * **By-Reference Parameter Passing:** `CALLNAT` subprogram invocations with isolated callee context instantiation, ordered parameter mapping (`DEFINE DATA PARAMETER`), and mutated lvalue writeback.
 * **Program Chaining:** `FETCH` (terminal control transfer with early return) and `FETCH RETURN` (subroutine program chaining).
@@ -182,18 +181,27 @@ The compiler strictly decouples source language frontend parsing, intermediate s
 * **Internal Subroutines:** `DEFINE SUBROUTINE` blocks invoked via `PERFORM`.
 * **Program Termination:** `STOP` and `TERMINATE` mapped to `sys.exit(0)`.
 
-### 4. Arithmetic & Data Operations
+### 5. Arithmetic & Data Operations
 
 * **Arithmetic Engines:** `ADD`, `SUBTRACT`, `MULTIPLY`, `DIVIDE` supporting compound multi-operands (`ADD a b c TO total`), explicit `GIVING` destinations, and `DIVIDE ... REMAINDER` assignments.
 * **Precision & Rounding:** Decimal arithmetic quantization using `ROUND_HALF_UP` for `ROUNDED` statements.
 * **String Manipulation:** `SEPARATE ... INTO ... WITH DELIMITER`, `COMPRESS ... INTO ... [LEAVING NO SPACE]`, `EXAMINE ... TRANSLATE INTO UPPER/LOWER CASE`, `EXAMINE ... GIVING NUMBER`, `EXAMINE ... REPLACE WITH`, and `MOVE ALL` character fills.
-* **Edit Mask Formatting & Unmasking:** Date conversions (`YYYYMMDD` $\leftrightarrow$ ISO), extended financial formatting (`(EM=$ZZZ,ZZ9.99CR)`, `(EM=ZZZ,ZZ9.99DB)`, `(EM=ZZZ,ZZ9.99-)`, `(EM=ZZZ,ZZ9.99+)`), and accounting sign/currency unmasking via `unmask_decimal` and `unmask_integer`.
 * **Memory Reset:** `RESET` restoring variables to typed default states (`""`, `0`, `Decimal('0')`, `False`).
 
-### 5. Formatted I/O & Scoped Error Handling
+### 6. Formatted I/O & Scoped Error Handling
 
 * **Tabulation & Continuation:** `WRITE` and `PRINT` formatting supporting absolute column tab stops (`5T`, `35T`), line splits (`/`), string repetitions (`'-' (55)`), and runtime column width tabulation via `tabulate(tab(col), ...)`.
 * **Error Scopes (`ON ERROR`):** Global module-level and localized subroutine-level `ON ERROR ... END-ERROR` recovery blocks lowered to localized `try: ... except Exception:` handlers.
+
+---
+
+## Multi-Target Backend Architecture
+
+| Target Language | Status | Data Layer | Runtime Library | Execution Model |
+| --- | --- | --- | --- | --- |
+| **Python** | **Complete (Default)** | SQLAlchemy Declarative Base | `natural_runtime/` (unmask, tabulation, slicing, arrays) | In-memory via `MockSession` or standalone CLI (`--emit-main`) |
+| **TypeScript** | *Under Development* | Prisma / Drizzle / Interface Schemas | `natural_runtime/` (`.ts` utilities via `Decimal.js`) | Node/TSX execution runner |
+| **Go / Java / C#** | *Architecture-Ready* | Native SQL / GORM / EF Core | Target Runtime Package | Native compiled binaries / classes |
 
 ---
 
@@ -214,43 +222,43 @@ Initializes the isolated Python virtual environment, installs dependencies in ed
 
 ### Running Tests & Verification
 
-Execute the complete regression test suite (asserts character-for-character snapshot matching and executes test cases):
+Execute the complete regression test suite:
 
 ```bash
 ./build.sh test
 
 ```
 
-Target specific fixtures by substring or pattern:
+Target specific fixtures or sub-tests using pattern matching:
 
 ```bash
-# Run single test
-./build.sh test calendar_sample
+# Run a specific fixture file
+./build.sh test type_coercion_casts
 
-# Run multiple specific tests
-./build.sh test redefine at_break histogram
+# Run a specific sub-test within a multi-test fixture
+./build.sh test type_coercion_casts.widen_and_narrow
 
-# Enable verbose logging (emits IR passes, emitted code, and execution steps)
-./build.sh test calendar_sample -v
+# Run multiple fixtures with verbose logging
+./build.sh test redefine at_break type_coercion_casts -v
 
 ```
 
 ### Evaluating Semantic Parity (`evaluate`)
 
-When refactoring emitter logic or runtime libraries, verify functional behavior against `=== EXECUTE ===` test cases without failing on syntactic snapshot diffs:
+Verify functional runtime execution against `=== EXECUTE ===` test assertions without failing on syntactic code differences:
 
 ```bash
 # Evaluate all fixtures for functional correctness
 ./build.sh evaluate
 
 # Evaluate specific fixtures
-./build.sh evaluate bonuscalc io_tabulation
+./build.sh evaluate bonuscalc type_coercion_casts
 
 ```
 
 ### Auto-Blessing Snapshots (`bless`)
 
-Once `./build.sh evaluate` confirms behavioral correctness, automatically update fixture golden-master snapshots with the new emitted output:
+Automatically update fixture golden-master snapshots with updated compiler output once `./build.sh evaluate` confirms behavioral correctness:
 
 ```bash
 # Bless all fixtures whose generated code changed
@@ -263,13 +271,11 @@ Once `./build.sh evaluate` confirms behavioral correctness, automatically update
 
 ### Building & Running Compiled Workspaces
 
-Execute standalone programs through the driver or compile workspaces with targeted languages:
-
 ```bash
-# Build workspace targeting Python (default) with Git-style diffs
+# Build workspace targeting Python with Git-style diffs
 ./build.sh run build workspaces/calendar-end-of-month --diff
 
-# Build workspace targeting another language (e.g. typescript)
+# Build workspace targeting another language
 natural build workspaces/freight-calc --target=typescript
 
 # Execute compiled module directly via driver
@@ -280,50 +286,42 @@ natural build workspaces/freight-calc --target=typescript
 
 ```
 
-### Clean Environment
-
-Deletes virtual environments, bytecode caches, build outputs, and the global symlink:
-
-```bash
-./build.sh clean
-
-```
-
 ---
 
-## Test Harness & Snapshot Architecture
+## Test Harness & Fixture Architecture
 
-Tests are self-contained `.test` files in `tests/fixtures/`. The test engine (`tests/test_fixtures.py`) dynamically creates isolated workspace environments, executes the compiler, validates generated code against snapshots, reflects SQLAlchemy schema types to coerce test record inputs, and executes the compiled classes in-memory against a mock database engine.
+Tests are self-contained `.test` files in `tests/fixtures/`. The test engine (`tests/test_fixtures.py`) dynamically creates isolated workspaces, compiles source modules, validates generated code against snapshots, reflects SQLAlchemy schema types to coerce test record inputs, and executes compiled contexts in-memory against a mock database session.
 
-Fixtures support multi-module workspaces, multiple emitted target languages, and functional execution assertions:
+### Multi-Test Fixtures
+
+Fixtures support grouping multiple distinct test cases inside a single `.test` file using `=== TEST: <name> ===` boundaries:
 
 ```text
-=== NATURAL: EMPLOYEES.ddm ===
-1 AC NAME                                 A   20  N N
-1 AB LANG                                 A    3  N (1:7)
-
-=== NATURAL: SAMPLE.nsp ===
-DEFINE DATA LOCAL
-01 #OFFSET (I2) INIT<1>
-...
+=== TEST: widen_and_narrow ===
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #INT_VAL  (I4)
+1 #WIDENED  (P7.2)
 END-DEFINE
-...
+#WIDENED := #INT_VAL
 
-=== PYTHON: sample.py ===
-from target_orm import Employees
-from natural_runtime import tab, tabulate
-...
+=== PYTHON ===
+from decimal import Decimal
+
+class WidenAndNarrowContext:
+    def __init__(self):
+        self.int_val = 0
+        self.widened = Decimal('0')
+
+def execute_widen_and_narrow(ctx: WidenAndNarrowContext, session):
+    ctx.widened = Decimal(ctx.int_val)
+    return ctx
 
 === EXECUTE ===
 - input:
-    offset: 1
-  records:
-    - id: 1
-      name: "SMITH"
-      lang:
-        - ["EN", "FR", "DE", "ES", "IT", "NL", "PT"]
+    int_val: 50
   expected:
-    offset: 1
+    widened: "50"
 
 ```
 
@@ -339,7 +337,7 @@ from natural_runtime import tab, tabulate
 │   └── natural/
 │       ├── cli.py                          # Typer CLI driver (parse, build, run)
 │       ├── codegen/
-│       │   ├── common/                     # Shared target-agnostic codegen utilities
+│       │   ├── common/                     # Target-agnostic code formatting & naming utilities
 │       │   │   ├── writer.py               # CodeWriter (scoped indentation buffer)
 │       │   │   └── naming.py               # Keyword sanitization, PascalCase, snake_case
 │       │   ├── target.py                   # TargetBackend abstract protocol & registry
@@ -348,7 +346,7 @@ from natural_runtime import tab, tabulate
 │       │       │   ├── target.py           # PythonTarget registration
 │       │       │   ├── engine.py           # Module code generation orchestrator
 │       │       │   ├── context.py          # EmitterContext & symbol resolution
-│       │       │   ├── expressions.py      # PythonExpressionEmitter
+│       │       │   ├── expressions.py      # PythonExpressionEmitter (emits exprs & CastOps)
 │       │       │   ├── harvester.py        # Import and dependency scanner
 │       │       │   ├── formatters.py       # Edit mask formatting engines
 │       │       │   ├── orm.py              # SQLAlchemy model emitter & fallback base
@@ -370,25 +368,25 @@ from natural_runtime import tab, tabulate
 │       ├── ir/
 │       │   ├── models.py                   # IR0 Syntactic AST definitions
 │       │   ├── pass1_models.py             # Pass 1 structural block models
-│       │   ├── semantic.py                 # IR1 Semantic DAG & symbol table models
+│       │   ├── semantic.py                 # IR1 Semantic DAG, CastKind, Symbol & Type models
 │       │   └── serializer.py               # Clean YAML serializer with empty-node pruning
 │       ├── normalizer/
 │       │   ├── lowering/                   # Modular Semantic Lowering Pass (IR0 -> IR1)
 │       │   │   ├── context.py              # LoweringContext & ActiveLoopContext
 │       │   │   ├── engine.py               # SemanticLoweringPass orchestrator
-│       │   │   ├── expressions.py          # Target-agnostic ExpressionLowerer
-│       │   │   └── handlers/               # Domain-specific lowering handlers
+│       │   │   ├── expressions.py          # Bottom-up ExpressionLowerer & type synthesizers
+│       │   │   └── handlers/               # Domain-specific lowering handlers (coerce_type)
 │       │   ├── pass1_parser.py             # Island grammar parser and transformer
-│       │   ├── pass2_dispatcher.py         # Specialized statement dispatcher
+│       │   ├── pass2_dispatcher.py         # Pass 2 statement dispatcher
 │       │   ├── preprocessor.py             # Include expander and comment stripper
 │       │   ├── workspace.py                # DDM, NSA, and copycode dependency resolver
-│       │   └── parsers/                    # Specialized statement micro-parsers
+│       │   └── parsers/                    # CFG statement micro-parsers (Lark-based)
 │       └── orchestrator/
 │           └── builder.py                  # Topological DAG workspace builder
 └── tests/
     ├── conftest.py                         # Pytest configuration (--bless, --evaluate, --verbose-test)
-    ├── test_fixtures.py                    # Golden-master test and evaluation engine
-    └── fixtures/                           # 41 End-to-end integration test suites
+    ├── test_fixtures.py                    # Multi-test golden-master test and evaluation engine
+    └── fixtures/                           # 42 End-to-end integration test suites
         ├── accept_reject.test              # Row filtering via ACCEPT / REJECT
         ├── adabas_periodic_group.test      # DDM PE/MU periodic group indexing
         ├── array_lifecycle.test            # EXPAND / REDUCE / RESIZE ARRAY & *OCC
@@ -429,6 +427,7 @@ from natural_runtime import tab, tabulate
         ├── subroutine.test                 # Internal subroutine PERFORM blocks
         ├── superdescriptor.test            # Composite descriptor slice decomposition
         ├── transaction.test                # END and BACKOUT TRANSACTION
+        ├── type_coercion_casts.test        # Multi-test: widen/narrow, unmask, stringify, edit masks
         └── user_function.test              # DEFINE FUNCTION typed methods
 
 ```
