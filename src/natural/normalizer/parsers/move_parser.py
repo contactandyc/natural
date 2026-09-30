@@ -2,58 +2,57 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
-from natural.ir.models import MoveStatement, MoveByNameStatement
-from natural.normalizer.parsers.expression_parser import ExpressionParser
+from lark import Lark
+from natural.ir.models import MoveStatement, MoveByNameStatement, Expression
+from natural.normalizer.parsers.expression_parser import SHARED_EXPR_GRAMMAR, ExpressionTransformer
 
+move_grammar = f"""
+    ?start: move_stmt | move_by_name_stmt
+
+    move_by_name_stmt: "MOVE"i "BY"i "NAME"i VAR_NAME "TO"i VAR_NAME
+
+    move_stmt: "MOVE"i all_flag? edited_flag? expr "TO"i expr
+    
+    all_flag: "ALL"i
+    edited_flag: "EDITED"i
+
+    {SHARED_EXPR_GRAMMAR}
+"""
+
+class MoveTransformer(ExpressionTransformer):
+    def all_flag(self, children): return ("all", True)
+    def edited_flag(self, children): return ("edited", True)
+
+    def move_by_name_stmt(self, tokens):
+        # tokens[0] and tokens[1] are VAR_NAME strings
+        return MoveByNameStatement(
+            source=str(tokens[0]),
+            target=str(tokens[1])
+        )
+
+    def move_stmt(self, children):
+        is_all = any(isinstance(c, tuple) and c[0] == "all" for c in children)
+
+        exprs = [c for c in children if isinstance(c, Expression)]
+        source_expr = exprs[0]
+        target_expr = exprs[1]
+
+        # In Natural, the edit mask can be attached to either the source or the target
+        final_mask = getattr(target_expr, "edit_mask", None) or getattr(source_expr, "edit_mask", None)
+
+        return MoveStatement(
+            source=source_expr,
+            target=target_expr,
+            edit_mask=final_mask,
+            is_move_all=is_all
+        )
 
 class MoveParser:
     def __init__(self):
-        self.expr_parser = ExpressionParser()
-        self.move_by_name_pattern = re.compile(
-            r"^\s*MOVE\s+BY\s+NAME\s+([*#\+A-Za-z0-9\-_\.]+)\s+TO\s+([*#\+A-Za-z0-9\-_\.]+)\s*$",
-            re.IGNORECASE,
-        )
-        self.move_pattern = re.compile(
-            r"^\s*MOVE\s+(ALL\s+)?(?:EDITED\s+)?(.+?)\s+TO\s+(.+)$",
-            re.IGNORECASE,
-        )
-        self.em_pattern = re.compile(r"^(.*?)\s*\(\s*EM\s*=\s*([^)]+)\s*\)$", re.IGNORECASE)
+        self.parser = Lark(move_grammar, parser="lalr")
+        self.transformer = MoveTransformer()
 
     def parse(self, raw_statement: str):
         clean_stmt = re.sub(r"/\*.*$", "", raw_statement).strip()
-
-        m_name = self.move_by_name_pattern.match(clean_stmt)
-        if m_name:
-            return MoveByNameStatement(
-                source=m_name.group(1).strip(),
-                target=m_name.group(2).strip(),
-            )
-
-        match = self.move_pattern.match(clean_stmt)
-        if not match:
-            raise ValueError(f"Invalid MOVE syntax: {raw_statement}")
-
-        is_all = bool(match.group(1))
-        source_part = match.group(2).strip()
-        target_part = match.group(3).strip()
-
-        source_mask, target_mask = None, None
-
-        s_match = self.em_pattern.match(source_part)
-        if s_match:
-            source_part = s_match.group(1).strip()
-            source_mask = s_match.group(2).strip()
-
-        t_match = self.em_pattern.match(target_part)
-        if t_match:
-            target_part = t_match.group(1).strip()
-            target_mask = t_match.group(2).strip()
-
-        final_mask = target_mask or source_mask
-
-        return MoveStatement(
-            source=self.expr_parser.parse(source_part),
-            target=self.expr_parser.parse(target_part),
-            edit_mask=final_mask,
-            is_move_all=is_all,
-        )
+        tree = self.parser.parse(clean_stmt)
+        return self.transformer.transform(tree)

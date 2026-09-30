@@ -1,13 +1,16 @@
+# tests/test_fixtures.py
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 
+import collections
 import difflib
 import importlib
 import re
 import sys
+import traceback
 from decimal import Decimal
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 import pytest
 import yaml
@@ -21,6 +24,35 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures"
 console = Console()
 
 HEADER_RE = re.compile(r"^===\s*([A-Za-z0-9_-]+)(?::\s*([^=\n]+?))?\s*===$")
+TEST_HEADER_RE = re.compile(r"^===\s*TEST:\s*(.+?)\s*===$")
+
+
+def split_test_file(content: str, default_stem: str) -> List[Tuple[str, str]]:
+    """Splits a .test file into discrete chunks if multiple === TEST: name === headers exist."""
+    has_multiple_tests = bool(TEST_HEADER_RE.search(content))
+    if not has_multiple_tests:
+        return [(default_stem, content.strip())]
+
+    test_chunks = []
+    lines = content.splitlines()
+    current_test_name = None
+    current_buffer = []
+
+    for line in lines:
+        m = TEST_HEADER_RE.match(line.strip())
+        if m:
+            if current_test_name is not None:
+                test_chunks.append((current_test_name, "\n".join(current_buffer).strip()))
+            current_test_name = m.group(1).strip()
+            current_buffer = []
+        else:
+            if current_test_name is not None:
+                current_buffer.append(line)
+
+    if current_test_name is not None:
+        test_chunks.append((current_test_name, "\n".join(current_buffer).strip()))
+
+    return test_chunks
 
 
 def parse_fixture(raw_text: str, default_stem: str) -> Tuple[Dict[str, str], Dict[str, str], str, bool, bool]:
@@ -97,19 +129,75 @@ def serialize_fixture(
     return "\n\n".join(sections).strip() + "\n"
 
 
-@pytest.mark.parametrize("fixture_path", list(FIXTURE_DIR.glob("*.test")), ids=lambda p: p.stem)
-def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
+def gather_test_cases():
+    """Generates an explicit test case for every sub-test found in all .test files."""
+    cases = []
+    for path in sorted(FIXTURE_DIR.glob("*.test")):
+        content = path.read_text(encoding="utf-8")
+        chunks = split_test_file(content, path.stem)
+        for test_name, chunk_content in chunks:
+            cases.append((path, test_name, chunk_content, len(chunks) > 1))
+    return cases
+
+
+TEST_CASES = gather_test_cases()
+
+
+def generate_id(case):
+    """Produces the ID that pytest uses. Format: `filename` or `filename.subtest_name`"""
+    path, test_name, _, has_multiple = case
+    if has_multiple:
+        return f"{path.stem}.{test_name}"
+    return path.stem
+
+
+@pytest.fixture(scope="session", autouse=True)
+def bless_session_manager(request):
+    """
+    Session-scoped fixture that aggregates blessed test chunks.
+    It writes them back to disk all at once when the test suite completes,
+    preventing file I/O collisions and preserving un-run tests in the same file.
+    """
+    bless_enabled = request.config.getoption("--bless", default=False)
+    # Structure: Dict[file_path, Dict[test_name, new_content]]
+    accumulator = collections.defaultdict(dict)
+
+    yield accumulator
+
+    if bless_enabled and accumulator:
+        for file_path, updates in accumulator.items():
+            current_file_content = file_path.read_text(encoding="utf-8")
+            all_chunks = split_test_file(current_file_content, file_path.stem)
+
+            new_content_parts = []
+            for name, content in all_chunks:
+                # If this specific test chunk was run and updated, use the new content
+                # Otherwise, preserve the exact existing chunk content
+                chunk_to_write = updates.get(name, content)
+
+                if len(all_chunks) > 1:
+                    new_content_parts.append(f"=== TEST: {name} ===\n{chunk_to_write.strip()}")
+                else:
+                    new_content_parts.append(chunk_to_write.strip())
+
+            file_path.write_text("\n\n".join(new_content_parts) + "\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("case_data", TEST_CASES, ids=generate_id)
+def test_pipeline_and_execution(case_data, request, tmp_path: Path, bless_session_manager):
+    fixture_path, test_name, test_content, has_multiple_tests = case_data
+
     bless_enabled = request.config.getoption("--bless", default=False)
     evaluate_enabled = request.config.getoption("--evaluate", default=False)
     verbose_enabled = request.config.getoption("--verbose-test", default=False)
-    content = fixture_path.read_text(encoding="utf-8")
 
     natural_files, expected_py_files, execute_yaml, has_exp_nat, has_exp_py = parse_fixture(
-        content, fixture_path.stem
+        test_content, test_name
     )
 
     if verbose_enabled:
-        console.print(f"\n[bold magenta]═════════ Running Fixture: {fixture_path.name} ═════════[/bold magenta]")
+        title = f" Running: {fixture_path.name} | Test: {test_name} " if has_multiple_tests else f" Running Fixture: {fixture_path.name} "
+        console.print(f"\n[bold magenta]{'═' * 9}{title}{'═' * 9}[/bold magenta]")
         for fname, n_src in natural_files.items():
             console.print(Panel(Syntax(n_src, "text", line_numbers=True), title=f"[bold cyan]Input: {fname}[/bold cyan]"))
 
@@ -164,178 +252,159 @@ def test_pipeline_and_execution(fixture_path: Path, request, tmp_path: Path):
             diffs.append(f"Missing expected snapshot for emitted file: {actual_name}")
 
     if diffs:
-        if bless_enabled:
-            new_content = serialize_fixture(
-                natural_files,
-                relevant_py_files,
-                execute_yaml,
-                has_exp_nat,
-                has_exp_py or len(relevant_py_files) > 1,
-                )
-            fixture_path.write_text(new_content, encoding="utf-8")
-        elif not evaluate_enabled:
-            diff_report = "\n\n".join(diffs)
-            assert False, f"Code generation mismatch in {fixture_path.name}:\n{diff_report}"
-        else:
-            if verbose_enabled:
-                console.print(
-                    f"[yellow]Notice: Emitted code differs from snapshot in {fixture_path.name} (evaluating behavior)[/yellow]"
-                )
+        diff_report = "\n\n".join(diffs)
+
+        if not bless_enabled and not evaluate_enabled:
+            assert False, f"Code generation mismatch in {fixture_path.name} (Test: {test_name}):\n{diff_report}"
+        elif evaluate_enabled and verbose_enabled:
+            console.print(
+                f"[yellow]Notice: Emitted code differs from snapshot in {fixture_path.name} (Test: {test_name}) (evaluating behavior)[/yellow]"
+            )
+
+    # Accumulate the blessed result so the session teardown can write it safely
+    if bless_enabled:
+        blessed_chunk_str = serialize_fixture(
+            natural_files,
+            relevant_py_files,
+            execute_yaml,
+            has_exp_nat,
+            has_exp_py or len(relevant_py_files) > 1,
+            )
+        bless_session_manager[fixture_path][test_name] = blessed_chunk_str
 
     if not execute_yaml:
         return
 
-    test_data = yaml.safe_load(execute_yaml)
-    if isinstance(test_data, dict):
-        entrypoint_candidate = test_data.get("entrypoint")
-        test_cases = test_data.get("cases", [])
-    elif isinstance(test_data, list):
-        entrypoint_candidate = None
-        test_cases = test_data
-    else:
-        return
+    # --- Execution Validation ---
+    try:
+        test_data = yaml.safe_load(execute_yaml)
+        if isinstance(test_data, dict):
+            entrypoint_candidate = test_data.get("entrypoint")
+            test_cases = test_data.get("cases", [])
+        elif isinstance(test_data, list):
+            entrypoint_candidate = None
+            test_cases = test_data
+        else:
+            return
 
-    fixture_stem = fixture_path.stem.lower().replace("-", "_")
-    if entrypoint_candidate:
-        entrypoint_stem = entrypoint_candidate.lower().replace("-", "_")
-    elif fixture_stem in module_stems:
-        entrypoint_stem = fixture_stem
-    else:
-        nsp_stems = [
-            Path(f).stem.lower().replace("-", "_")
-            for f in natural_files
-            if f.lower().endswith(".nsp")
-        ]
-        entrypoint_stem = nsp_stems[0] if nsp_stems else sorted(module_stems)[0]
+        fixture_stem = test_name.lower().replace("-", "_")
+        if entrypoint_candidate:
+            entrypoint_stem = entrypoint_candidate.lower().replace("-", "_")
+        elif fixture_stem in module_stems:
+            entrypoint_stem = fixture_stem
+        else:
+            nsp_stems = [
+                Path(f).stem.lower().replace("-", "_")
+                for f in natural_files
+                if f.lower().endswith(".nsp")
+            ]
+            entrypoint_stem = nsp_stems[0] if nsp_stems else sorted(module_stems)[0]
 
-    py_dir_str = str(py_dir.resolve())
-    if py_dir_str not in sys.path:
+        py_dir_str = str(py_dir.resolve())
+        if py_dir_str in sys.path:
+            sys.path.remove(py_dir_str)
         sys.path.insert(0, py_dir_str)
 
-    # Evict cached test and runtime modules for an isolated run
-    for mod_name in list(sys.modules.keys()):
-        if (
-                mod_name in module_stems
-                or mod_name == "target_orm"
-                or mod_name == "natural_runtime"
-                or mod_name.startswith("natural_runtime.")
-        ):
-            del sys.modules[mod_name]
+        for mod_name in list(sys.modules.keys()):
+            if (
+                    mod_name in module_stems
+                    or mod_name == "target_orm"
+                    or mod_name == "natural_runtime"
+                    or mod_name.startswith("natural_runtime.")
+            ):
+                del sys.modules[mod_name]
 
-    # Harvest column types from target_orm to coerce mock records into proper Python types
-    col_types = {}
-    if (py_dir / "target_orm.py").exists():
-        try:
-            target_orm_mod = importlib.import_module("target_orm")
-            for attr_name in dir(target_orm_mod):
-                attr = getattr(target_orm_mod, attr_name)
-                if isinstance(attr, type) and hasattr(attr, "__table__"):
-                    for col in attr.__table__.columns:
-                        try:
-                            norm_name = col.name.lower().replace("-", "_").replace("#", "")
-                            col_types[norm_name] = col.type.python_type
-                        except (NotImplementedError, AttributeError):
-                            pass
-        except Exception:
-            pass
+        col_types = {}
+        if (py_dir / "target_orm.py").exists():
+            try:
+                target_orm_mod = importlib.import_module("target_orm")
+                for attr_name in dir(target_orm_mod):
+                    attr = getattr(target_orm_mod, attr_name)
+                    if isinstance(attr, type) and hasattr(attr, "__table__"):
+                        for col in attr.__table__.columns:
+                            try:
+                                norm_name = col.name.lower().replace("-", "_").replace("#", "")
+                                col_types[norm_name] = col.type.python_type
+                            except (NotImplementedError, AttributeError):
+                                pass
+            except Exception:
+                pass
 
-    entrypoint_mod = importlib.import_module(entrypoint_stem)
+        entrypoint_mod = importlib.import_module(entrypoint_stem)
 
-    func_name = f"execute_{entrypoint_stem}"
-    execute_func = getattr(entrypoint_mod, func_name, None)
-    assert execute_func is not None, f"Expected entrypoint function '{func_name}' not found in {entrypoint_stem}.py"
+        func_name = f"execute_{entrypoint_stem}"
+        execute_func = getattr(entrypoint_mod, func_name, None)
+        assert execute_func is not None, f"Expected entrypoint function '{func_name}' not found in {entrypoint_stem}.py"
 
-    ctx_class_name = "".join(part.title() for part in entrypoint_stem.split("_")) + "Context"
-    ctx_class = getattr(entrypoint_mod, ctx_class_name, None)
-    assert ctx_class is not None, f"Expected context class '{ctx_class_name}' not found in {entrypoint_stem}.py"
+        ctx_class_name = "".join(part.title() for part in entrypoint_stem.split("_")) + "Context"
+        ctx_class = getattr(entrypoint_mod, ctx_class_name, None)
+        assert ctx_class is not None, f"Expected context class '{ctx_class_name}' not found in {entrypoint_stem}.py"
 
-    class MockQuery(list):
-        def filter(self, *args, **kwargs):
-            return self
+        class MockQuery(list):
+            def filter(self, *args, **kwargs): return self
+            def limit(self, *args, **kwargs): return self
+            def group_by(self, *args, **kwargs): return self
+            def all(self): return self
 
-        def limit(self, *args, **kwargs):
-            return self
+        class MockSession:
+            def __init__(self, records=None):
+                self._records = records or []
+            def query(self, *args, **kwargs): return MockQuery(self._records)
+            def get(self, entity, ident): return self._records[0] if self._records else entity()
+            def add(self, *args): pass
+            def delete(self, *args): pass
+            def flush(self): pass
+            def commit(self): pass
+            def rollback(self): pass
+            def refresh(self, *args): pass
 
-        def group_by(self, *args, **kwargs):
-            return self
+        if verbose_enabled:
+            console.print(f"[bold cyan]5. Executing Test Cases against '{entrypoint_stem}.py':[/bold cyan]")
 
-        def all(self):
-            return self
+        for i, case in enumerate(test_cases, 1):
+            records = []
+            for r in case.get("records", []):
+                coerced_r = dict(r)
+                for k, val in r.items():
+                    norm_k = k.lower().replace("-", "_").replace("#", "")
+                    expected_type = col_types.get(norm_k)
+                    if expected_type is Decimal and not isinstance(val, Decimal):
+                        try: coerced_r[k] = Decimal(str(val))
+                        except Exception: pass
+                    elif expected_type is int and not isinstance(val, int):
+                        try: coerced_r[k] = int(val)
+                        except Exception: pass
+                    elif expected_type is bool and not isinstance(val, bool):
+                        coerced_r[k] = str(val).lower() in ("true", "1", "yes", "t")
+                records.append(type("Record", (), coerced_r)())
 
-    class MockSession:
-        def __init__(self, records=None):
-            self._records = records or []
+            session = MockSession(records)
+            ctx = ctx_class()
+            for field, val in case.get("input", {}).items():
+                default_val = getattr(ctx, field, None)
+                if isinstance(default_val, Decimal) and not isinstance(val, Decimal):
+                    val = Decimal(str(val))
+                elif isinstance(default_val, int) and not isinstance(val, int):
+                    val = int(val)
+                elif isinstance(default_val, bool) and not isinstance(val, bool):
+                    val = str(val).lower() in ("true", "1", "yes", "t")
+                setattr(ctx, field, val)
 
-        def query(self, *args, **kwargs):
-            return MockQuery(self._records)
+            result_ctx = execute_func(ctx, session)
 
-        def get(self, entity, ident):
-            return self._records[0] if self._records else entity()
+            for expected_field, expected_val in case.get("expected", {}).items():
+                actual_val = getattr(result_ctx, expected_field)
+                if verbose_enabled:
+                    console.print(
+                        f"  • Case #{i} | Input: {case.get('input')} ➔ {expected_field} = [bold green]{actual_val!r}[/bold green] (expected: {expected_val!r})"
+                    )
 
-        def add(self, *args):
-            pass
-
-        def delete(self, *args):
-            pass
-
-        def flush(self):
-            pass
-
-        def commit(self):
-            pass
-
-        def rollback(self):
-            pass
-
-        def refresh(self, *args):
-            pass
-
-    if verbose_enabled:
-        console.print(f"[bold cyan]5. Executing Test Cases against '{entrypoint_stem}.py':[/bold cyan]")
-
-    for i, case in enumerate(test_cases, 1):
-        records = []
-        for r in case.get("records", []):
-            coerced_r = dict(r)
-            for k, val in r.items():
-                norm_k = k.lower().replace("-", "_").replace("#", "")
-                expected_type = col_types.get(norm_k)
-                if expected_type is Decimal and not isinstance(val, Decimal):
-                    try:
-                        coerced_r[k] = Decimal(str(val))
-                    except Exception:
-                        pass
-                elif expected_type is int and not isinstance(val, int):
-                    try:
-                        coerced_r[k] = int(val)
-                    except Exception:
-                        pass
-                elif expected_type is bool and not isinstance(val, bool):
-                    coerced_r[k] = str(val).lower() in ("true", "1", "yes", "t")
-            records.append(type("Record", (), coerced_r)())
-
-        session = MockSession(records)
-        ctx = ctx_class()
-        for field, val in case.get("input", {}).items():
-            default_val = getattr(ctx, field, None)
-            if isinstance(default_val, Decimal) and not isinstance(val, Decimal):
-                val = Decimal(str(val))
-            elif isinstance(default_val, int) and not isinstance(val, int):
-                val = int(val)
-            elif isinstance(default_val, bool) and not isinstance(val, bool):
-                val = str(val).lower() in ("true", "1", "yes", "t")
-            setattr(ctx, field, val)
-
-        result_ctx = execute_func(ctx, session)
-
-        for expected_field, expected_val in case.get("expected", {}).items():
-            actual_val = getattr(result_ctx, expected_field)
-            if verbose_enabled:
-                console.print(
-                    f"  • Case #{i} | Input: {case.get('input')} ➔ {expected_field} = [bold green]{actual_val!r}[/bold green] (expected: {expected_val!r})"
+                assert str(actual_val) == str(expected_val), (
+                    f"Case #{i} failed: "
+                    f"field '{expected_field}' expected {expected_val!r}, got {actual_val!r}"
                 )
 
-            assert str(actual_val) == str(expected_val), (
-                f"Case #{i} in {fixture_path.name} failed: "
-                f"field '{expected_field}' expected {expected_val!r}, got {actual_val!r}"
-            )
+    except AssertionError as e:
+        assert False, f"Execution failed in {fixture_path.name} (Test: {test_name}):\n{e}"
+    except Exception as e:
+        assert False, f"Runtime error in {fixture_path.name} (Test: {test_name}):\n{traceback.format_exc()}"

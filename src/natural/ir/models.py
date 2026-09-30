@@ -81,6 +81,7 @@ class Expression(BaseModel):
     substring: Optional[SubstringSpec] = None
     func_name: Optional[str] = None
     func_args: List["Expression"] = Field(default_factory=list)
+    edit_mask: Optional[str] = None
 
 
 SubstringSpec.model_rebuild()

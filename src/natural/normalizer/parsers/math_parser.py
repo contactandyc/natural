@@ -1,135 +1,120 @@
+# src/natural/normalizer/parsers/math_parser.py
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 
 import re
+from lark import Lark
 from typing import List
 from natural.ir.models import AssignStatement, Expression
-from natural.normalizer.parsers.expression_parser import ExpressionParser
+from natural.normalizer.parsers.expression_parser import SHARED_EXPR_GRAMMAR, ExpressionTransformer
 
+math_grammar = f"""
+    ?start: math_stmt
+    ?math_stmt: add_stmt | sub_stmt | mult_stmt | div_stmt
+
+    add_stmt: "ADD"i rounded_flag? expr+ dest_clause
+    dest_clause: "TO"i expr giving_clause? -> to_dest
+               | "GIVING"i expr            -> giving_dest
+
+    sub_stmt: "SUBTRACT"i rounded_flag? expr+ "FROM"i expr giving_clause?
+    mult_stmt: "MULTIPLY"i rounded_flag? expr "BY"i expr giving_clause?
+    div_stmt: "DIVIDE"i rounded_flag? expr "INTO"i expr giving_clause? remainder_clause?
+
+    giving_clause: "GIVING"i expr
+    remainder_clause: "REMAINDER"i expr
+    rounded_flag: "ROUNDED"i
+
+    {SHARED_EXPR_GRAMMAR}
+"""
+
+class MathTransformer(ExpressionTransformer):
+    def rounded_flag(self, children):
+        return True
+
+    def giving_clause(self, children):
+        return ("giving", children[0])
+
+    def remainder_clause(self, children):
+        return ("remainder", children[0])
+
+    def to_dest(self, children):
+        giving = next((c for c in children if isinstance(c, tuple) and c[0] == "giving"), None)
+        return ("to", children[0], giving[1] if giving else None)
+
+    def giving_dest(self, children):
+        return ("giving_only", children[0])
+
+    def add_stmt(self, children):
+        is_rounded = True in children
+        exprs = [c for c in children if isinstance(c, Expression)]
+        dest_info = next(c for c in children if isinstance(c, tuple) and c[0] in ("to", "giving_only"))
+
+        if dest_info[0] == "to":
+            target_expr = dest_info[1]
+            giving_target = dest_info[2]
+            current_expr = target_expr
+            for operand in exprs:
+                current_expr = Expression(kind="binary_op", operator="+", left=current_expr, right=operand)
+        else:
+            giving_target = dest_info[1]
+            current_expr = exprs[0]
+            for operand in exprs[1:]:
+                current_expr = Expression(kind="binary_op", operator="+", left=current_expr, right=operand)
+
+        out_target = giving_target if giving_target else target_expr if dest_info[0] == "to" else giving_target
+        return [AssignStatement(target=out_target, value=current_expr, rounded=is_rounded)]
+
+    def sub_stmt(self, children):
+        is_rounded = True in children
+        exprs = [c for c in children if isinstance(c, Expression)]
+        target_expr = exprs[-1]
+        operands = exprs[:-1]
+        giving = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "giving"), None)
+
+        current_expr = target_expr
+        for operand in operands:
+            current_expr = Expression(kind="binary_op", operator="-", left=current_expr, right=operand)
+
+        out_target = giving if giving else target_expr
+        return [AssignStatement(target=out_target, value=current_expr, rounded=is_rounded)]
+
+    def mult_stmt(self, children):
+        is_rounded = True in children
+        exprs = [c for c in children if isinstance(c, Expression)]
+        val1 = exprs[0]
+        val2 = exprs[1]
+        giving = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "giving"), None)
+
+        binary_expr = Expression(kind="binary_op", operator="*", left=val1, right=val2)
+        out_target = giving if giving else val1
+        return [AssignStatement(target=out_target, value=binary_expr, rounded=is_rounded)]
+
+    def div_stmt(self, children):
+        is_rounded = True in children
+        exprs = [c for c in children if isinstance(c, Expression)]
+        val_expr = exprs[0]
+        target_expr = exprs[1]
+        giving = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "giving"), None)
+        remainder = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "remainder"), None)
+
+        quot_target = giving if giving else target_expr
+        binary_expr = Expression(kind="binary_op", operator="/", left=target_expr, right=val_expr)
+        quot_stmt = AssignStatement(target=quot_target, value=binary_expr, rounded=is_rounded)
+
+        if remainder:
+            rem_expr = Expression(kind="binary_op", operator="%", left=target_expr, right=val_expr)
+            rem_stmt = AssignStatement(target=remainder, value=rem_expr, rounded=False)
+            # Guarantee remainder happens first in codegen
+            return [rem_stmt, quot_stmt]
+
+        return [quot_stmt]
 
 class MathParser:
     def __init__(self):
-        self.expr_parser = ExpressionParser()
-        self.pattern = re.compile(
-            r"^\s*(ADD|SUBTRACT|MULTIPLY|DIVIDE)(?:\s+(ROUNDED))?\s+(.+?)(?:\s+(TO|FROM|BY|INTO)\s+(.+))?$",
-            re.IGNORECASE,
-        )
+        self.parser = Lark(math_grammar, parser="lalr")
+        self.transformer = MathTransformer()
 
     def parse(self, raw_statement: str) -> List[AssignStatement]:
         clean_statement = re.sub(r"/\*.*$", "", raw_statement).strip()
-        match = self.pattern.match(clean_statement)
-        if not match:
-            raise ValueError(f"Invalid math syntax: {raw_statement}")
-
-        op_word = match.group(1).upper()
-        is_rounded = bool(match.group(2))
-        expr1_raw = match.group(3).strip()
-        prep = match.group(4).upper() if match.group(4) else None
-        rest = match.group(5).strip() if match.group(5) else ""
-
-        giving_target = None
-        rem_target = None
-
-        if prep:
-            # Check for trailing REMAINDER
-            rem_match = re.search(r"\s+REMAINDER\s+([*#\+A-Za-z0-9\-_\.]+)\s*$", rest, re.IGNORECASE)
-            if rem_match:
-                rem_target = self.expr_parser.parse(rem_match.group(1).strip())
-                rest = rest[:rem_match.start()].strip()
-
-            # Check for trailing GIVING
-            giving_match = re.search(r"\s+GIVING\s+([*#\+A-Za-z0-9\-_\.]+)\s*$", rest, re.IGNORECASE)
-            if giving_match:
-                giving_target = self.expr_parser.parse(giving_match.group(1).strip())
-                rest = rest[:giving_match.start()].strip()
-
-            if not rem_target:
-                rem_match = re.search(r"\s+REMAINDER\s+([*#\+A-Za-z0-9\-_\.]+)\s*$", rest, re.IGNORECASE)
-                if rem_match:
-                    rem_target = self.expr_parser.parse(rem_match.group(1).strip())
-                    rest = rest[:rem_match.start()].strip()
-        else:
-            # Syntax: ADD a b GIVING c
-            giving_match = re.search(r"\s+GIVING\s+([*#\+A-Za-z0-9\-_\.]+)\s*$", expr1_raw, re.IGNORECASE)
-            if giving_match:
-                giving_target = self.expr_parser.parse(giving_match.group(1).strip())
-                expr1_raw = expr1_raw[:giving_match.start()].strip()
-
-        if op_word == "ADD":
-            operands = [self.expr_parser.parse(op) for op in expr1_raw.split() if op.strip()]
-            if rest:
-                target_expr = self.expr_parser.parse(rest)
-                current_expr = target_expr
-                for operand in operands:
-                    current_expr = Expression(
-                        kind="binary_op",
-                        operator="+",
-                        left=current_expr,
-                        right=operand,
-                    )
-            else:
-                current_expr = operands[0]
-                for operand in operands[1:]:
-                    current_expr = Expression(
-                        kind="binary_op",
-                        operator="+",
-                        left=current_expr,
-                        right=operand,
-                    )
-                target_expr = giving_target
-
-            out_target = giving_target if giving_target else target_expr
-            return [AssignStatement(target=out_target, value=current_expr, rounded=is_rounded)]
-
-        elif op_word == "SUBTRACT":
-            operands = [self.expr_parser.parse(op) for op in expr1_raw.split() if op.strip()]
-            target_expr = self.expr_parser.parse(rest)
-            current_expr = target_expr
-            for operand in operands:
-                current_expr = Expression(
-                    kind="binary_op",
-                    operator="-",
-                    left=current_expr,
-                    right=operand,
-                )
-            out_target = giving_target if giving_target else target_expr
-            return [AssignStatement(target=out_target, value=current_expr, rounded=is_rounded)]
-
-        elif op_word == "MULTIPLY":
-            val1 = self.expr_parser.parse(expr1_raw)
-            val2 = self.expr_parser.parse(rest)
-            binary_expr = Expression(
-                kind="binary_op",
-                operator="*",
-                left=val1,
-                right=val2,
-            )
-            out_target = giving_target if giving_target else val1
-            return [AssignStatement(target=out_target, value=binary_expr, rounded=is_rounded)]
-
-        elif op_word == "DIVIDE":
-            val_expr = self.expr_parser.parse(expr1_raw)
-            target_expr = self.expr_parser.parse(rest)
-            quot_target = giving_target if giving_target else target_expr
-            binary_expr = Expression(
-                kind="binary_op",
-                operator="/",
-                left=target_expr,
-                right=val_expr,
-            )
-            quot_stmt = AssignStatement(target=quot_target, value=binary_expr, rounded=is_rounded)
-
-            if rem_target:
-                rem_expr = Expression(
-                    kind="binary_op",
-                    operator="%",
-                    left=target_expr,
-                    right=val_expr,
-                )
-                rem_stmt = AssignStatement(target=rem_target, value=rem_expr, rounded=False)
-                # Remainder statement runs first to avoid operating on a mutated dividend
-                return [rem_stmt, quot_stmt]
-
-            return [quot_stmt]
-
-        raise ValueError(f"Unknown math operation: {raw_statement}")
+        tree = self.parser.parse(clean_statement)
+        return self.transformer.transform(tree)

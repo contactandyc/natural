@@ -3,29 +3,45 @@
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
 import re
-from natural.ir.models import AssignStatement
-from natural.normalizer.parsers.expression_parser import ExpressionParser
+from lark import Lark
+from natural.ir.models import AssignStatement, Expression
+from natural.normalizer.parsers.expression_parser import SHARED_EXPR_GRAMMAR, ExpressionTransformer, ExpressionParser
 
+assign_grammar = f"""
+    ?start: assign_stmt
+    
+    assign_stmt: assign_kw? rounded_flag? expr assign_op expr
+    
+    assign_kw: "ASSIGN"i | "COMPUTE"i
+    rounded_flag: "ROUNDED"i
+    assign_op: ":=" | "="
+    
+    {SHARED_EXPR_GRAMMAR}
+"""
+
+class AssignTransformer(ExpressionTransformer):
+    def rounded_flag(self, children):
+        return True
+
+    def assign_stmt(self, children):
+        # Extract expressions (target and value)
+        exprs = [c for c in children if isinstance(c, Expression)]
+        # Check if the ROUNDED flag was caught
+        is_rounded = True in children
+
+        return AssignStatement(
+            target=exprs[0],
+            value=exprs[1],
+            rounded=is_rounded
+        )
 
 class AssignParser:
     def __init__(self):
+        self.parser = Lark(assign_grammar, parser="lalr")
+        self.transformer = AssignTransformer()
         self.expr_parser = ExpressionParser()
-        self.assign_pattern = re.compile(
-            r"^(?:ASSIGN\s+|COMPUTE\s+)?(?:\s*(ROUNDED)\s+)?(.+?)\s*(:=|=)\s*(.+)$",
-            re.IGNORECASE,
-        )
 
     def parse(self, raw_statement: str) -> AssignStatement:
         clean_statement = re.sub(r"/\*.*$", "", raw_statement).strip()
-        match = self.assign_pattern.match(clean_statement)
-        if not match:
-            raise ValueError(f"Invalid assignment syntax: {raw_statement}")
-
-        is_rounded = bool(match.group(1))
-        target_raw = match.group(2).strip()
-        raw_expr = re.sub(r"/\*.*$", "", match.group(4)).strip()
-
-        parsed_target = self.expr_parser.parse(target_raw)
-        parsed_expr = self.expr_parser.parse(raw_expr)
-
-        return AssignStatement(target=parsed_target, value=parsed_expr, rounded=is_rounded)
+        tree = self.parser.parse(clean_statement)
+        return self.transformer.transform(tree)

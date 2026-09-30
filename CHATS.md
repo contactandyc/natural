@@ -821,3 +821,25 @@ Introduced modular target runtime libraries (`targets/<lang>/runtime/`), refacto
 * Automated reflection of SQLAlchemy column types from generated `target_orm.py` in the test harness.
 * Coerces raw string fixture inputs on mock database records into `Decimal`, `int`, and `bool` instances to prevent runtime `TypeError` mismatches during filtering and arithmetic checks.
 
+---
+
+# Chat - Architectural Roadmap, Micro-Parser Hardening & Multi-Test Fixtures - https://share.gemini.google/93s6omCq0nmi
+
+### 1. Strategic Architectural Roadmap
+Defined a comprehensive 4-phase plan to transition the compiler from a 1:1 behavioral migration tool into an enterprise-grade, multi-language modernization pipeline:
+- **Hardening Compiler Correctness:** Eradicate regex-based micro-parsers in favor of robust Context-Free Grammars (Lark) and introduce explicit Semantic Type Inference + Cast nodes in IR1.
+- **Scaling to Multi-Language Outputs:** Decouple Python-specific string concatenation into Abstract Code DOMs or Jinja2 templates, ensuring target-specific runtime parity (e.g., `decimal.js` for TypeScript).
+- **Translating Data Models into Schemas:** Introduce a Schema IR (IR-S) to translate Adabas DDMs into relational schemas (1:Many normalization for MU/PE fields), Prisma schemas, and OpenAPI specifications.
+- **Migrating to API Backend + React Frontend:** Implement Program Slicing to decouple procedural UI (`INPUT`/`WRITE`). Extract DTOs for Request/Response payloads, convert control flow into a state machine, and generate React structural components from absolute tab coordinates.
+
+### 2. Micro-Parser Hardening (Regex to Lark)
+Eliminated brittle regular expressions across critical Pass 2 statement dispatchers, replacing them with unified Lark grammars composed of a shared `SHARED_EXPR_GRAMMAR`.
+- **Refactored Parsers:** `AssignParser`, `MathParser`, `StringOpParser` (COMPRESS, SEPARATE, EXAMINE, RESET), `MoveParser`, and `ForParser`.
+- **Expression Safety:** Solved tokenization vulnerabilities where nested parentheses, function calls (`FN#`), array bounds, or string literals containing Natural keywords previously crashed the regex parsers.
+- **Edit Mask Handling:** Taught the `ExpressionParser` to natively recognize and attach `(EM=...)` edit masks to `Expression` AST nodes directly, simplifying upstream parsers.
+
+### 3. Multi-Test Fixture Harness
+Upgraded `tests/test_fixtures.py` to support multiple distinct test cases within a single `.test` file.
+- **Logical Chunking:** Introduced `=== TEST: <name> ===` boundaries to logically group related edge cases (e.g., `compress.basic_compress`, `compress.leaving_no_space`).
+- **Pytest Parametrization:** Mapped sub-tests directly into pytest IDs, enabling targeted execution via dot-notation (e.g., `./build.sh test at_break.sub_test1`).
+- **Stateful Blessing:** Implemented a session-scoped `bless_session_manager` fixture. When running `--bless` on a targeted subset of tests, it isolates the new outputs in memory and safely performs a single read-modify-write on teardown, preventing file I/O collisions or the deletion of un-run tests.

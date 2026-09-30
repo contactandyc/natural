@@ -2,15 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
-import re
 from decimal import Decimal
 from typing import List
 from lark import Lark, Transformer
 from natural.ir.models import Expression, SubstringSpec
 
-expr_grammar = r"""
-    ?start: logical_or
-
+# Expose the base grammar so other micro-parsers can compose it
+SHARED_EXPR_GRAMMAR = r"""
     ?logical_or: logical_and
                | logical_or LOGICAL_OR logical_and   -> binary_expr
 
@@ -21,22 +19,22 @@ expr_grammar = r"""
                | comparison COMP_OP expr              -> binary_expr
 
     ?expr: term
-         | expr ADD_OP term                          -> binary_expr
+         | expr ADD_OP term                           -> binary_expr
 
     ?term: power
-         | term MULT_OP power                        -> binary_expr
+         | term MULT_OP power                         -> binary_expr
 
     ?power: factor
-          | power POWER_OP factor                    -> binary_expr
+          | power POWER_OP factor                     -> binary_expr
 
-    ?factor: NUMBER                                  -> num_lit
-           | STRING                                  -> str_lit
-           | DATE_LITERAL                            -> date_lit
-           | BOOLEAN_LITERAL                         -> bool_lit
-           | SYSTEM_VAR                              -> sys_var
-           | substring_func                          -> substring_expr
-           | VAR_NAME "(" [RAW_BRACKET] ")"          -> var_with_bracket
-           | VAR_NAME                                -> var_ref
+    ?factor: NUMBER                                   -> num_lit
+           | STRING                                   -> str_lit
+           | DATE_LITERAL                             -> date_lit
+           | BOOLEAN_LITERAL                          -> bool_lit
+           | SYSTEM_VAR                               -> sys_var
+           | substring_func                           -> substring_expr
+           | VAR_NAME "(" [RAW_BRACKET] ")"           -> var_with_bracket
+           | VAR_NAME                                 -> var_ref
            | tuple_expr
            | "(" logical_or ")"
 
@@ -62,9 +60,9 @@ expr_grammar = r"""
     %ignore WS
 """
 
+expr_grammar = "?start: logical_or\n" + SHARED_EXPR_GRAMMAR
 
 def _split_args(content: str) -> List[str]:
-    """Splits arguments by comma while respecting nested parentheses and string quotes."""
     args = []
     current = []
     depth = 0
@@ -93,16 +91,13 @@ def _split_args(content: str) -> List[str]:
             args.append(tail)
     return args
 
-
 _cached_expr_parser = None
-
 
 def _get_expr_parser():
     global _cached_expr_parser
     if _cached_expr_parser is None:
         _cached_expr_parser = ExpressionParser()
     return _cached_expr_parser
-
 
 class ExpressionTransformer(Transformer):
     def num_lit(self, tokens):
@@ -133,6 +128,15 @@ class ExpressionTransformer(Transformer):
     def var_with_bracket(self, tokens):
         var_name = str(tokens[0])
         raw_content = str(tokens[1]).strip() if len(tokens) > 1 and tokens[1] is not None else ""
+
+        # Safely extract and attach Edit Masks (EM=...) to the Expression
+        if raw_content.upper().startswith("EM="):
+            return Expression(
+                kind="ref",
+                value=var_name,
+                edit_mask=raw_content[3:].strip()
+            )
+
         sub_parser = _get_expr_parser()
 
         if var_name.upper().startswith(("F#", "FN#", "UDF#")):
@@ -220,7 +224,6 @@ class ExpressionTransformer(Transformer):
                 right=children[1],
             )
         raise ValueError(f"Unexpected children for binary_expr: {children}")
-
 
 class ExpressionParser:
     def __init__(self):
