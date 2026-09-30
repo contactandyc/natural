@@ -7,6 +7,7 @@ from typing import Dict, List, Set, Tuple
 from natural.ir.semantic import (
     AssignOp,
     CallProgramOp,
+    CastKind,
     EntityGetOp,
     EntityStoreOp,
     FetchOp,
@@ -65,8 +66,24 @@ class ImportHarvester:
 
         def scan_expr(expr):
             nonlocal needs_decimal, needs_date, needs_datetime, needs_timedelta
+            nonlocal needs_unmask_decimal, needs_unmask_integer
             if not expr:
                 return
+            if expr.op == "cast":
+                if expr.cast_kind == CastKind.UNMASK:
+                    if expr.target_type and expr.target_type.base == "integer":
+                        needs_unmask_integer = True
+                    else:
+                        needs_unmask_decimal = True
+                        needs_decimal = True
+                elif expr.cast_kind in (CastKind.PARSE_DATE, CastKind.FORMAT_DATE):
+                    needs_datetime = True
+                elif expr.cast_kind == CastKind.WIDEN:
+                    needs_decimal = True
+                elif expr.cast_kind == CastKind.EDIT_MASK:
+                    if expr.lhs and expr.lhs.inferred_type and expr.lhs.inferred_type.base == "decimal":
+                        needs_decimal = True
+
             if expr.op == "literal" and isinstance(expr.value, Decimal):
                 needs_decimal = True
             if expr.op in ("sys_date",):
@@ -107,19 +124,10 @@ class ImportHarvester:
                     if op.target_substring:
                         needs_slice_assign = True
                     target_sym = self.ctx.get_symbol(op.target_id)
-                    source_sym = self.ctx.get_symbol(op.expr.symbol_id) if op.expr.symbol_id else None
-                    if target_sym and target_sym.semantic_type.base in ("decimal", "numeric") and source_sym and source_sym.semantic_type.base == "string":
-                        needs_unmask_decimal = True
-                    elif target_sym and target_sym.semantic_type.base == "integer" and source_sym and source_sym.semantic_type.base == "string":
-                        needs_unmask_integer = True
+                    if op.rounded and target_sym and target_sym.semantic_type.base == "decimal":
+                        needs_decimal = True
+                        needs_round_half_up = True
 
-                    if op.rounded:
-                        if target_sym and target_sym.semantic_type.base == "decimal":
-                            needs_decimal = True
-                            needs_round_half_up = True
-                    if op.edit_mask:
-                        if (target_sym and target_sym.semantic_type.base == "date") or (source_sym and source_sym.semantic_type.base == "date"):
-                            needs_datetime = True
                 if hasattr(op, "expr"):
                     scan_expr(op.expr)
                 if hasattr(op, "key_expr"):

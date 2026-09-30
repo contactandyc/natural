@@ -82,7 +82,10 @@ from .pass1_models import (
     SubroutineBlock,
 )
 from .semantic import (
+    CastKind,
     EntityGetOp,
+    SemanticType,
+    wrap_cast,
 )
 from .serializer import serialize_to_yaml
 
@@ -99,6 +102,7 @@ __all__ = [
     "BeforeBreakBlock",
     "BlockNode",
     "CallnatStatement",
+    "CastKind",
     "CloseWorkFileStatement",
     "CompressStatement",
     "ConditionalStatement",
@@ -151,6 +155,7 @@ __all__ = [
     "ResetStatement",
     "ResizeArrayStatement",
     "ScopeType",
+    "SemanticType",
     "SeparateStatement",
     "Statement",
     "StopStatement",
@@ -165,4 +170,5 @@ __all__ = [
     "WriteStatement",
     "WriteWorkFileStatement",
     "serialize_to_yaml",
+    "wrap_cast",
 ]

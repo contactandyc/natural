@@ -188,6 +188,24 @@ class LoweringContext:
                     )
                     self.symbols[f"{v_name}.{f_name}"] = sym
 
+    def get_symbol(self, name_or_id: str) -> Optional[Symbol]:
+        """Resolves symbol definitions across function-local and global scope dictionaries."""
+        if not name_or_id:
+            return None
+        if self.active_function_name and name_or_id in self.function_symbols:
+            return self.function_symbols[name_or_id]
+        if name_or_id in self.symbols:
+            return self.symbols[name_or_id]
+        clean = name_or_id.split(".")[-1].lower().replace("#", "")
+        if self.active_function_name:
+            for s in self.function_symbols.values():
+                if s.id == name_or_id or s.name.lower().replace("#", "") == clean:
+                    return s
+        for s in self.symbols.values():
+            if s.id == name_or_id or s.name.lower().replace("#", "") == clean:
+                return s
+        return None
+
     def resolve_ref(self, name: str) -> str:
         if self.active_function_name:
             if name in self.function_symbols:

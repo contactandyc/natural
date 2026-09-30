@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
-from typing import List
+import re
+from typing import List, Optional
 from natural.ir.models import (
     AssignStatement,
     CompressStatement,
@@ -16,6 +17,7 @@ from natural.ir.models import (
 )
 from natural.ir.semantic import (
     AssignOp,
+    CastKind,
     CompressOp,
     ExamineOp,
     MoveAllOp,
@@ -25,10 +27,61 @@ from natural.ir.semantic import (
     SemanticExpression,
     SemanticStatement,
     SemanticSubstring,
+    SemanticType,
     SeparateOp,
+    wrap_cast,
 )
 from natural.normalizer.lowering.context import LoweringContext, normalize_fn_name
 from natural.normalizer.lowering.expressions import ExpressionLowerer
+
+
+def coerce_type(
+        expr: SemanticExpression,
+        target_type: Optional[SemanticType],
+        edit_mask: Optional[str] = None,
+        rounded: bool = False,
+) -> SemanticExpression:
+    """Injects explicit wrap_cast nodes into expression DAG when types or representations differ."""
+    if not target_type or not expr.inferred_type:
+        if edit_mask:
+            return wrap_cast(expr, target_type or SemanticType(base="string"), CastKind.EDIT_MASK, edit_mask=edit_mask)
+        return expr
+
+    source_type = expr.inferred_type
+
+    # 1. Edit mask conversion (date formatting, date parsing, numeric masks)
+    if edit_mask:
+        if source_type.base == "date" and target_type.base == "string":
+            return wrap_cast(expr, target_type, CastKind.FORMAT_DATE, edit_mask=edit_mask)
+        elif source_type.base == "string" and target_type.base == "date":
+            return wrap_cast(expr, target_type, CastKind.PARSE_DATE, edit_mask=edit_mask)
+        elif source_type.base in ("decimal", "integer", "numeric") and target_type.base == "string":
+            return wrap_cast(expr, target_type, CastKind.EDIT_MASK, edit_mask=edit_mask)
+        elif target_type.base in ("decimal", "numeric") and source_type.base == "string":
+            return wrap_cast(expr, target_type, CastKind.UNMASK, edit_mask=edit_mask)
+        elif target_type.base == "integer" and source_type.base == "string":
+            return wrap_cast(expr, target_type, CastKind.UNMASK, edit_mask=edit_mask)
+
+    # 2. String to Numeric Unmasking
+    if target_type.base in ("decimal", "numeric") and source_type.base == "string":
+        return wrap_cast(expr, target_type, CastKind.UNMASK)
+    if target_type.base == "integer" and source_type.base == "string":
+        return wrap_cast(expr, target_type, CastKind.UNMASK)
+
+    # 3. Numeric narrowing / division truncation
+    if target_type.base == "integer" and (source_type.base in ("decimal", "numeric") or expr.op == "divide"):
+        if (source_type.scale or 0) > 0 or expr.op == "divide":
+            return wrap_cast(expr, target_type, CastKind.NARROW)
+
+    # 4. Numeric widening (integer -> decimal)
+    if target_type.base in ("decimal", "numeric") and source_type.base == "integer":
+        return wrap_cast(expr, target_type, CastKind.WIDEN)
+
+    # 5. Stringification
+    if target_type.base == "string" and source_type.base not in ("string", "unknown"):
+        return wrap_cast(expr, target_type, CastKind.STRINGIFY)
+
+    return expr
 
 
 def lower_assign(
@@ -39,11 +92,37 @@ def lower_assign(
 ) -> List[SemanticStatement]:
     target_str = str(stmt.target.value) if hasattr(stmt.target, "value") else str(stmt.target)
 
+    # Function return value assignment
     if ctx.active_function_name:
         if normalize_fn_name(target_str) == normalize_fn_name(ctx.active_function_name):
-            return [ReturnOp(expr=expr_lowerer.lower(stmt.value))]
+            val_expr = expr_lowerer.lower(stmt.value)
+            fn_clean = normalize_fn_name(ctx.active_function_name)
+            for f_name, f_def in ctx.ast.functions.items():
+                if normalize_fn_name(f_name) == fn_clean and f_def.returns_raw:
+                    m = re.search(r"\(([^)]+)\)", f_def.returns_raw)
+                    raw_ret = m.group(1) if m else f_def.returns_raw.replace("RETURNS", "").strip()
+                    ret_type = ctx.parse_format(raw_ret)
+                    val_expr = coerce_type(val_expr, ret_type, edit_mask=None, rounded=stmt.rounded)
+                    break
+            return [ReturnOp(expr=val_expr)]
 
     target_id = ctx.resolve_ref(target_str)
+    target_sym = ctx.get_symbol(target_id) or ctx.get_symbol(target_str)
+
+    if target_sym and target_sym.redefine_parent:
+        if target_sym.semantic_type.base == "string":
+            target_type = target_sym.semantic_type
+        else:
+            target_type = SemanticType(
+                base="integer",
+                length=target_sym.semantic_type.length or target_sym.semantic_type.precision or 4,
+            )
+    else:
+        target_type = target_sym.semantic_type if target_sym else None
+
+    raw_expr = expr_lowerer.lower(stmt.value)
+    coerced_expr = coerce_type(raw_expr, target_type, edit_mask=None, rounded=stmt.rounded)
+
     target_sub = None
     if hasattr(stmt.target, "substring") and stmt.target.substring:
         target_sub = SemanticSubstring(
@@ -56,7 +135,7 @@ def lower_assign(
             target_id=target_id,
             target_substring=target_sub,
             target_indices=target_indices,
-            expr=expr_lowerer.lower(stmt.value),
+            expr=coerced_expr,
             rounded=stmt.rounded,
         )
     ]
@@ -77,10 +156,27 @@ def lower_move_by_name(
     for norm, src_sym_id, _ in source_fields:
         if norm in target_map:
             tgt_sym_id, _ = target_map[norm]
+            tgt_sym = ctx.get_symbol(tgt_sym_id)
+            ref_expr = SemanticExpression(op="ref", symbol_id=src_sym_id)
+            if tgt_sym:
+                if tgt_sym.redefine_parent:
+                    if tgt_sym.semantic_type.base == "string":
+                        tgt_type = tgt_sym.semantic_type
+                    else:
+                        tgt_type = SemanticType(
+                            base="integer",
+                            length=tgt_sym.semantic_type.length or tgt_sym.semantic_type.precision or 4,
+                        )
+                else:
+                    tgt_type = tgt_sym.semantic_type
+
+                src_sym = ctx.get_symbol(src_sym_id)
+                ref_expr.inferred_type = src_sym.semantic_type if src_sym else None
+                ref_expr = coerce_type(ref_expr, tgt_type)
             assign_ops.append(
                 AssignOp(
                     target_id=tgt_sym_id,
-                    expr=SemanticExpression(op="ref", symbol_id=src_sym_id),
+                    expr=ref_expr,
                 )
             )
 
@@ -95,6 +191,22 @@ def lower_move(
 ) -> List[SemanticStatement]:
     target_str = str(stmt.target.value) if hasattr(stmt.target, "value") else str(stmt.target)
     target_id = ctx.resolve_ref(target_str)
+    target_sym = ctx.get_symbol(target_id) or ctx.get_symbol(target_str)
+
+    if target_sym and target_sym.redefine_parent:
+        if target_sym.semantic_type.base == "string":
+            target_type = target_sym.semantic_type
+        else:
+            target_type = SemanticType(
+                base="integer",
+                length=target_sym.semantic_type.length or target_sym.semantic_type.precision or 4,
+            )
+    else:
+        target_type = target_sym.semantic_type if target_sym else None
+
+    raw_expr = expr_lowerer.lower(stmt.source)
+    coerced_expr = coerce_type(raw_expr, target_type, edit_mask=stmt.edit_mask, rounded=False)
+
     target_sub = None
     if hasattr(stmt.target, "substring") and stmt.target.substring:
         target_sub = SemanticSubstring(
@@ -116,7 +228,7 @@ def lower_move(
             target_id=target_id,
             target_substring=target_sub,
             target_indices=target_indices,
-            expr=expr_lowerer.lower(stmt.source),
+            expr=coerced_expr,
             edit_mask=stmt.edit_mask,
         )
     ]

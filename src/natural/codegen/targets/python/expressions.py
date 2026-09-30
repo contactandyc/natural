@@ -4,17 +4,42 @@
 
 from decimal import Decimal
 from typing import Optional
-from natural.ir.semantic import SemanticExpression
+from natural.ir.semantic import CastKind, SemanticExpression
 from natural.codegen.targets.python.context import EmitterContext
+from natural.codegen.targets.python.formatters import convert_edit_mask, format_numeric_edit_mask_expr
 
 
 class PythonExpressionEmitter:
-    """Emits SemanticExpression trees into valid Python code."""
+    """Emits SemanticExpression trees and typed CastOp nodes into valid Python code."""
 
     def __init__(self, ctx: EmitterContext):
         self.ctx = ctx
 
     def emit_expr(self, expr: SemanticExpression, model_class: Optional[str] = None) -> str:
+        if expr.op == "cast":
+            inner = self.emit_expr(expr.lhs, model_class=model_class)
+            if expr.cast_kind == CastKind.UNMASK:
+                if expr.target_type and expr.target_type.base == "integer":
+                    return f"unmask_integer({inner})"
+                return f"unmask_decimal({inner})"
+            elif expr.cast_kind == CastKind.PARSE_DATE:
+                py_mask = convert_edit_mask(expr.edit_mask or "YYYYMMDD")
+                return f"datetime.strptime({inner}, '{py_mask}').date()"
+            elif expr.cast_kind == CastKind.FORMAT_DATE:
+                py_mask = convert_edit_mask(expr.edit_mask or "YYYYMMDD")
+                return f"{inner}.strftime('{py_mask}')"
+            elif expr.cast_kind == CastKind.EDIT_MASK:
+                return format_numeric_edit_mask_expr(inner, expr.edit_mask or "")
+            elif expr.cast_kind == CastKind.NARROW:
+                return f"int({inner})"
+            elif expr.cast_kind == CastKind.WIDEN:
+                return f"Decimal({inner})"
+            elif expr.cast_kind == CastKind.STRINGIFY:
+                return f"str({inner})"
+            elif expr.cast_kind == CastKind.BOOL_COERCE:
+                return f"bool({inner})"
+            return inner
+
         if expr.op in ("ref", "entity_field"):
             base_ref = self.ctx.resolve_ref(expr.symbol_id, model_class=model_class)
             if getattr(expr, "array_indices", None):

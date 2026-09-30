@@ -2,8 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
+from enum import Enum
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, SerializeAsAny
-from typing import List, Optional, Dict, Any
+
+
+class CastKind(str, Enum):
+    WIDEN = "widen"               # integer -> decimal (lossless promotion)
+    NARROW = "narrow"             # decimal / division -> integer (truncation/rounding)
+    UNMASK = "unmask"             # string -> decimal / integer
+    EDIT_MASK = "edit_mask"       # numeric -> formatted string via edit mask
+    PARSE_DATE = "parse_date"     # string -> date
+    FORMAT_DATE = "format_date"   # date -> string
+    STRINGIFY = "stringify"       # any primitive -> string
+    BOOL_COERCE = "bool_coerce"   # any -> boolean
 
 
 class Provenance(BaseModel):
@@ -12,11 +24,20 @@ class Provenance(BaseModel):
 
 
 class SemanticType(BaseModel):
-    base: str  # string, decimal, date, boolean, integer, unknown
+    base: str  # string, decimal, date, boolean, integer, tuple, unknown
     precision: Optional[int] = None
     scale: Optional[int] = None
     length: Optional[int] = None
     storage: Optional[str] = None
+
+    def matches(self, other: Optional["SemanticType"]) -> bool:
+        if other is None:
+            return False
+        if self.base != other.base:
+            return False
+        if self.base == "decimal":
+            return (self.scale or 0) == (other.scale or 0)
+        return True
 
 
 class Symbol(BaseModel):
@@ -49,9 +70,32 @@ class SemanticExpression(SemanticNode):
     substring: Optional[SemanticSubstring] = None
     array_indices: List["SemanticExpression"] = Field(default_factory=list)
 
+    # Formal Type Annotations and Cast Metadata
+    inferred_type: Optional[SemanticType] = None
+    cast_kind: Optional[CastKind] = None
+    target_type: Optional[SemanticType] = None
+    edit_mask: Optional[str] = None
+
 
 SemanticSubstring.model_rebuild()
 SemanticExpression.model_rebuild()
+
+
+def wrap_cast(
+        expr: SemanticExpression,
+        target_type: SemanticType,
+        kind: CastKind,
+        edit_mask: Optional[str] = None,
+) -> SemanticExpression:
+    """Wraps an expression node in a typed CastOp node."""
+    return SemanticExpression(
+        op="cast",
+        lhs=expr,
+        cast_kind=kind,
+        target_type=target_type,
+        edit_mask=edit_mask,
+        inferred_type=target_type,
+    )
 
 
 class CallArgBinding(BaseModel):

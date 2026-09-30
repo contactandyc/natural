@@ -1,0 +1,324 @@
+=== TEST: widen_and_narrow ===
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #INT_VAL  (I4)
+1 #DEC_VAL  (P7.2)
+1 #WIDENED  (P7.2)
+1 #NARROWED (I4)
+END-DEFINE
+#WIDENED := #INT_VAL
+#NARROWED := #DEC_VAL
+
+=== PYTHON ===
+from decimal import Decimal
+
+class WidenAndNarrowContext:
+    def __init__(self):
+        self.int_val = 0
+        self.dec_val = Decimal('0')
+        self.widened = Decimal('0')
+        self.narrowed = 0
+
+def execute_widen_and_narrow(ctx: WidenAndNarrowContext, session):
+    ctx.widened = Decimal(ctx.int_val)
+    ctx.narrowed = int(ctx.dec_val)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    int_val: 50
+    dec_val: "123.75"
+  expected:
+    widened: "50"
+    narrowed: 123
+
+- input:
+    int_val: -25
+    dec_val: "-8.99"
+  expected:
+    widened: "-25"
+    narrowed: -8
+
+
+=== TEST: unmask_numeric ===
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #STR_DEC (A15)
+1 #STR_INT (A15)
+1 #DEC_OUT (P7.2)
+1 #INT_OUT (I4)
+END-DEFINE
+#DEC_OUT := #STR_DEC
+#INT_OUT := #STR_INT
+
+=== PYTHON ===
+from decimal import Decimal
+from natural_runtime import unmask_decimal, unmask_integer
+
+class UnmaskNumericContext:
+    def __init__(self):
+        self.str_dec = ""
+        self.str_int = ""
+        self.dec_out = Decimal('0')
+        self.int_out = 0
+
+def execute_unmask_numeric(ctx: UnmaskNumericContext, session):
+    ctx.dec_out = unmask_decimal(ctx.str_dec)
+    ctx.int_out = unmask_integer(ctx.str_int)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    str_dec: "$2,450.75"
+    str_int: "120-"
+  expected:
+    dec_out: "2450.75"
+    int_out: -120
+
+- input:
+    str_dec: "500"
+    str_int: "42"
+  expected:
+    dec_out: "500"
+    int_out: 42
+
+
+=== TEST: unmask_accounting ===
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #STR_CR   (A20)
+1 #STR_DB   (A20)
+1 #STR_PAR  (A20)
+1 #CR_OUT   (P7.2)
+1 #DB_OUT   (P7.2)
+1 #PAR_OUT  (P7.2)
+END-DEFINE
+#CR_OUT := #STR_CR
+#DB_OUT := #STR_DB
+#PAR_OUT := #STR_PAR
+
+=== PYTHON ===
+from decimal import Decimal
+from natural_runtime import unmask_decimal
+
+class UnmaskAccountingContext:
+    def __init__(self):
+        self.str_cr = ""
+        self.str_db = ""
+        self.str_par = ""
+        self.cr_out = Decimal('0')
+        self.db_out = Decimal('0')
+        self.par_out = Decimal('0')
+
+def execute_unmask_accounting(ctx: UnmaskAccountingContext, session):
+    ctx.cr_out = unmask_decimal(ctx.str_cr)
+    ctx.db_out = unmask_decimal(ctx.str_db)
+    ctx.par_out = unmask_decimal(ctx.str_par)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    str_cr: "$123.45CR"
+    str_db: "$250.50DB"
+    str_par: "(99.99)"
+  expected:
+    cr_out: "-123.45"
+    db_out: "-250.50"
+    par_out: "-99.99"
+
+
+=== TEST: date_format_and_parse ===
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #RAW_DATE  (A8)
+1 #PARSED_D  (D)
+1 #FORMATTED (A10)
+END-DEFINE
+MOVE EDITED #RAW_DATE TO #PARSED_D (EM=YYYYMMDD)
+MOVE EDITED #PARSED_D TO #FORMATTED (EM=YYYY-MM-DD)
+
+=== PYTHON ===
+from datetime import date, datetime
+
+class DateFormatAndParseContext:
+    def __init__(self):
+        self.raw_date = ""
+        self.parsed_d = date.today()
+        self.formatted = ""
+
+def execute_date_format_and_parse(ctx: DateFormatAndParseContext, session):
+    ctx.parsed_d = datetime.strptime(ctx.raw_date, '%Y%m%d').date()
+    ctx.formatted = ctx.parsed_d.strftime('%Y-%m-%d')
+    return ctx
+
+=== EXECUTE ===
+- input:
+    raw_date: "20261015"
+  expected:
+    formatted: "2026-10-15"
+
+- input:
+    raw_date: "19991231"
+  expected:
+    formatted: "1999-12-31"
+
+
+=== TEST: numeric_edit_mask ===
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #AMOUNT  (P7.2)
+1 #COUNT   (I4)
+1 #STR_AMT (A20)
+1 #STR_CNT (A20)
+END-DEFINE
+MOVE EDITED #AMOUNT TO #STR_AMT (EM=ZZZ,ZZ9.99-)
+MOVE EDITED #COUNT TO #STR_CNT (EM=ZZZ,ZZ9)
+
+=== PYTHON ===
+from decimal import Decimal
+
+class NumericEditMaskContext:
+    def __init__(self):
+        self.amount = Decimal('0')
+        self.count = 0
+        self.str_amt = ""
+        self.str_cnt = ""
+
+def execute_numeric_edit_mask(ctx: NumericEditMaskContext, session):
+    ctx.str_amt = f"{abs(ctx.amount):,.2f}{'-' if ctx.amount < 0 else ''}"
+    ctx.str_cnt = f"{ctx.count:,.0f}"
+    return ctx
+
+=== EXECUTE ===
+- input:
+    amount: "-1250.50"
+    count: 4200
+  expected:
+    str_amt: "1,250.50-"
+    str_cnt: "4,200"
+
+- input:
+    amount: "99.00"
+    count: 7
+  expected:
+    str_amt: "99.00"
+    str_cnt: "7"
+
+
+=== TEST: stringify_primitives ===
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #INT_VAL       (I4)
+1 #DEC_VAL       (P7.2)
+1 #BOOL_VAL      (L)
+1 #STR_FROM_INT  (A10)
+1 #STR_FROM_DEC  (A10)
+1 #STR_FROM_BOOL (A10)
+END-DEFINE
+#STR_FROM_INT := #INT_VAL
+#STR_FROM_DEC := #DEC_VAL
+#STR_FROM_BOOL := #BOOL_VAL
+
+=== PYTHON ===
+from decimal import Decimal
+
+class StringifyPrimitivesContext:
+    def __init__(self):
+        self.int_val = 0
+        self.dec_val = Decimal('0')
+        self.bool_val = False
+        self.str_from_int = ""
+        self.str_from_dec = ""
+        self.str_from_bool = ""
+
+def execute_stringify_primitives(ctx: StringifyPrimitivesContext, session):
+    ctx.str_from_int = str(ctx.int_val)
+    ctx.str_from_dec = str(ctx.dec_val)
+    ctx.str_from_bool = str(ctx.bool_val)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    int_val: 100
+    dec_val: "45.50"
+    bool_val: true
+  expected:
+    str_from_int: "100"
+    str_from_dec: "45.50"
+    str_from_bool: "True"
+
+
+=== TEST: division_to_int_narrow ===
+=== NATURAL ===
+DEFINE DATA PARAMETER
+1 #NUM    (I4)
+1 #DENOM  (I4)
+1 #RESULT (I4)
+END-DEFINE
+#RESULT := #NUM / #DENOM
+
+=== PYTHON ===
+class DivisionToIntNarrowContext:
+    def __init__(self):
+        self.num = 0
+        self.denom = 0
+        self.result = 0
+
+def execute_division_to_int_narrow(ctx: DivisionToIntNarrowContext, session):
+    ctx.result = int((ctx.num / ctx.denom))
+    return ctx
+
+=== EXECUTE ===
+- input:
+    num: 20
+    denom: 3
+  expected:
+    result: 6
+
+- input:
+    num: 100
+    denom: 4
+  expected:
+    result: 25
+
+
+=== TEST: function_return_coercion ===
+=== NATURAL: FUNC_COERCE.nsp ===
+DEFINE FUNCTION FN#PROMOTE_INT RETURNS (P7.2)
+DEFINE DATA PARAMETER
+1 #VAL (I4)
+END-DEFINE
+FN#PROMOTE_INT := #VAL
+END-FUNCTION
+
+DEFINE DATA PARAMETER
+1 #RAW_INT (I4)
+1 #OUT_DEC (P7.2)
+END-DEFINE
+#OUT_DEC := FN#PROMOTE_INT(#RAW_INT)
+
+=== PYTHON: func_coerce.py ===
+from decimal import Decimal
+
+def fn_promote_int(val: int) -> Decimal:
+    return Decimal(val)
+
+class FuncCoerceContext:
+    def __init__(self):
+        self.raw_int = 0
+        self.out_dec = Decimal('0')
+
+def execute_func_coerce(ctx: FuncCoerceContext, session):
+    ctx.out_dec = fn_promote_int(ctx.raw_int)
+    return ctx
+
+=== EXECUTE ===
+- input:
+    raw_int: 42
+  expected:
+    out_dec: "42"
+
+- input:
+    raw_int: -15
+  expected:
+    out_dec: "-15"

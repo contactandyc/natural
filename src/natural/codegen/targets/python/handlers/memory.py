@@ -13,7 +13,6 @@ from natural.ir.semantic import (
 )
 from natural.codegen.targets.python.context import EmitterContext
 from natural.codegen.targets.python.expressions import PythonExpressionEmitter
-from natural.codegen.targets.python.formatters import convert_edit_mask, format_numeric_edit_mask
 
 
 def emit_assign(
@@ -32,7 +31,6 @@ def emit_assign(
                 target = f"{target}[({idx_val} - 1)]"
 
     target_sym = ctx.get_symbol(op.target_id)
-    source_sym = ctx.get_symbol(op.expr.symbol_id) if op.expr.symbol_id else None
 
     if op.target_substring:
         start_val = expr_emitter.emit_expr(op.target_substring.start)
@@ -44,34 +42,6 @@ def emit_assign(
             ctx.emit_line(f"{target} = slice_assign({target}, {start_val}, None, {rhs_val})")
         return
 
-    if op.edit_mask and target_sym and source_sym:
-        if target_sym.semantic_type.base == "string" and source_sym.semantic_type.base == "date":
-            py_mask = convert_edit_mask(op.edit_mask)
-            ctx.emit_line(f"{target} = {ctx.resolve_ref(op.expr.symbol_id)}.strftime('{py_mask}')")
-            return
-        elif target_sym.semantic_type.base == "date" and source_sym.semantic_type.base == "string":
-            py_mask = convert_edit_mask(op.edit_mask)
-            ctx.emit_line(f"{target} = datetime.strptime({ctx.resolve_ref(op.expr.symbol_id)}, '{py_mask}').date()")
-            return
-        elif target_sym.semantic_type.base == "string" and source_sym.semantic_type.base in ("decimal", "integer", "numeric"):
-            src_ref = ctx.resolve_ref(op.expr.symbol_id)
-            formatted_line = format_numeric_edit_mask(target, src_ref, op.edit_mask)
-            ctx.emit_line(formatted_line)
-            return
-        elif target_sym.semantic_type.base in ("decimal", "numeric") and source_sym.semantic_type.base == "string":
-            src_ref = ctx.resolve_ref(op.expr.symbol_id)
-            ctx.emit_line(f"{target} = unmask_decimal({src_ref})")
-            return
-        elif target_sym.semantic_type.base == "integer" and source_sym.semantic_type.base == "string":
-            src_ref = ctx.resolve_ref(op.expr.symbol_id)
-            ctx.emit_line(f"{target} = unmask_integer({src_ref})")
-            return
-
-    if target_sym and target_sym.semantic_type.base in ("decimal", "numeric") and source_sym and source_sym.semantic_type.base == "string":
-        src_ref = ctx.resolve_ref(op.expr.symbol_id)
-        ctx.emit_line(f"{target} = unmask_decimal({src_ref})")
-        return
-
     expr = expr_emitter.emit_expr(op.expr)
     if op.rounded and target_sym and target_sym.semantic_type.base == "decimal":
         scale = target_sym.semantic_type.scale or 0
@@ -79,11 +49,6 @@ def emit_assign(
         ctx.emit_line(f"{target} = ({expr}).quantize({quant}, rounding=ROUND_HALF_UP)")
     elif op.rounded and target_sym and target_sym.semantic_type.base == "integer":
         ctx.emit_line(f"{target} = int(round({expr}))")
-    elif target_sym and target_sym.semantic_type.base == "integer":
-        if op.expr.op == "divide":
-            ctx.emit_line(f"{target} = int({expr})")
-        else:
-            ctx.emit_line(f"{target} = {expr}")
     else:
         ctx.emit_line(f"{target} = {expr}")
 

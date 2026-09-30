@@ -24,15 +24,11 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures"
 console = Console()
 
 HEADER_RE = re.compile(r"^===\s*([A-Za-z0-9_-]+)(?::\s*([^=\n]+?))?\s*===$")
-TEST_HEADER_RE = re.compile(r"^===\s*TEST:\s*(.+?)\s*===$")
+TEST_HEADER_RE = re.compile(r"^\s*===\s*TEST:\s*(.+?)\s*===\s*$", re.MULTILINE)
 
 
 def split_test_file(content: str, default_stem: str) -> List[Tuple[str, str]]:
-    """Splits a .test file into discrete chunks if multiple === TEST: name === headers exist."""
-    has_multiple_tests = bool(TEST_HEADER_RE.search(content))
-    if not has_multiple_tests:
-        return [(default_stem, content.strip())]
-
+    """Splits a .test file into discrete chunks if === TEST: name === headers exist."""
     test_chunks = []
     lines = content.splitlines()
     current_test_name = None
@@ -51,6 +47,9 @@ def split_test_file(content: str, default_stem: str) -> List[Tuple[str, str]]:
 
     if current_test_name is not None:
         test_chunks.append((current_test_name, "\n".join(current_buffer).strip()))
+
+    if not test_chunks:
+        return [(default_stem, content.strip())]
 
     return test_chunks
 
@@ -135,8 +134,9 @@ def gather_test_cases():
     for path in sorted(FIXTURE_DIR.glob("*.test")):
         content = path.read_text(encoding="utf-8")
         chunks = split_test_file(content, path.stem)
+        has_multiple = len(chunks) > 1 or (len(chunks) == 1 and chunks[0][0] != path.stem)
         for test_name, chunk_content in chunks:
-            cases.append((path, test_name, chunk_content, len(chunks) > 1))
+            cases.append((path, test_name, chunk_content, has_multiple))
     return cases
 
 
@@ -159,7 +159,6 @@ def bless_session_manager(request):
     preventing file I/O collisions and preserving un-run tests in the same file.
     """
     bless_enabled = request.config.getoption("--bless", default=False)
-    # Structure: Dict[file_path, Dict[test_name, new_content]]
     accumulator = collections.defaultdict(dict)
 
     yield accumulator
@@ -171,8 +170,6 @@ def bless_session_manager(request):
 
             new_content_parts = []
             for name, content in all_chunks:
-                # If this specific test chunk was run and updated, use the new content
-                # Otherwise, preserve the exact existing chunk content
                 chunk_to_write = updates.get(name, content)
 
                 if len(all_chunks) > 1:
@@ -261,7 +258,6 @@ def test_pipeline_and_execution(case_data, request, tmp_path: Path, bless_sessio
                 f"[yellow]Notice: Emitted code differs from snapshot in {fixture_path.name} (Test: {test_name}) (evaluating behavior)[/yellow]"
             )
 
-    # Accumulate the blessed result so the session teardown can write it safely
     if bless_enabled:
         blessed_chunk_str = serialize_fixture(
             natural_files,
@@ -396,7 +392,7 @@ def test_pipeline_and_execution(case_data, request, tmp_path: Path, bless_sessio
                 actual_val = getattr(result_ctx, expected_field)
                 if verbose_enabled:
                     console.print(
-                        f"  • Case #{i} | Input: {case.get('input')} ➔ {expected_field} = [bold green]{actual_val!r}[/bold green] (expected: {expected_val!r})"
+                        f"   • Case #{i} | Input: {case.get('input')} ➔ {expected_field} = [bold green]{actual_val!r}[/bold green] (expected: {expected_val!r})"
                     )
 
                 assert str(actual_val) == str(expected_val), (

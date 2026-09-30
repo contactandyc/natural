@@ -847,3 +847,81 @@ Upgraded `tests/test_fixtures.py` to support multiple distinct test cases within
 ---
 
 # Chat - Continuing hardening the micro-parsers - https://share.gemini.google/BxqKu7HRarYZ
+
+---
+
+# Chat - Strict SemanticType Checking, Explicit CastOp Nodes & Multi-Test Harness Hardening - https://share.gemini.google/w7nNMdzKGphQ
+
+### Summary of Changes
+
+This update delivers strict type inference and explicit type coercion across the compilation pipeline, eliminating runtime type guesswork in downstream emitters. It updates `CRITIQUE.md` with the latest architectural milestones, equips `SemanticExpression` with formal type metadata and a dedicated `CastOp` representation, centralizes type conversions in lowering, decouples backend emitters from ad-hoc symbol inspection, fixes multiline chunking in the multi-test fixture runner, and introduces a comprehensive 8-scenario type coercion test suite.
+
+---
+
+### 1. IR Schema Expansions (`src/natural/ir/semantic.py`, `src/natural/ir/__init__.py`)
+
+- **`CastKind` Enumeration:** Added explicit conversion classifications:
+  - `WIDEN`: Lossless integer-to-decimal promotion (`Decimal(val)`).
+  - `NARROW`: Decimal-to-integer truncation or division narrowing (`int(val)`).
+  - `UNMASK`: Alphanumeric-to-numeric extraction stripping `$`, `,`, trailing `-`, `CR`/`DB`, and accounting parentheses.
+  - `EDIT_MASK`: Numeric formatting into structured strings with padding, thousands commas, and sign indicators.
+  - `PARSE_DATE` / `FORMAT_DATE`: String-to-date and date-to-string conversions via edit masks.
+  - `STRINGIFY`: Primitive-to-string canonical stringification (`str(val)`).
+  - `BOOL_COERCE`: Primitive-to-boolean truthiness evaluation.
+- **`SemanticType` Compatibility Matching:** Implemented `SemanticType.matches()` to verify structural type parity across base types and decimal scales.
+- **Typed `SemanticExpression` Nodes:** Augmented `SemanticExpression` with `inferred_type`, `cast_kind`, `target_type`, and `edit_mask`.
+- **Cast Factory (`wrap_cast`):** Introduced a helper function to wrap expression nodes in explicit `op="cast"` operations with matching target annotations.
+
+---
+
+### 2. Semantic Lowering & Type Synthesis (`lowering/`)
+
+- **Symbol Lookup (`context.py`):** Added `LoweringContext.get_symbol()` to resolve symbols across global, parameter, entity, and active function scopes.
+- **Bottom-Up Type Inference (`expressions.py`):**
+  - Synthesizes `inferred_type` on all expression leaves: literals (`Decimal`, `int`, `str`, `bool`), variables, system variables (`*COUNTER`, `*DATX`, `*TIME`, `*OCC`), and user/built-in function invocations.
+  - Correctly evaluates redefined variable slices (`sym.redefine_parent is not None`) as `integer` property types to align with generated accessor methods.
+  - Computes binary expression result types: arithmetic operations preserve dominant decimal scales, division promotes to decimal, and comparisons/logicals infer as `boolean`.
+- **Assignment & Move Coercion (`handlers/memory.py`):**
+  - Implemented `coerce_type()` to compare source expression `inferred_type` with destination `target_type`.
+  - Injects typed `wrap_cast` nodes on `lower_assign`, `lower_move`, and `lower_move_by_name`.
+  - Enforces return type coercion on user-defined functions (`DEFINE FUNCTION ... RETURNS (...)`), ensuring function bodies wrap return expressions into the declared return type.
+
+---
+
+### 3. Target Backend Decoupling (`codegen/targets/python/`)
+
+- **Centralized Cast Emission (`expressions.py`):** Added `op == "cast"` handling in `PythonExpressionEmitter`. The backend directly translates `expr.cast_kind` into target operations (`Decimal()`, `int()`, `unmask_decimal()`, `unmask_integer()`, `datetime.strptime()`, `strftime()`, `str()`), removing all ad-hoc type inspection from statement handlers.
+- **Simplified Assignment Handler (`handlers/memory.py`):** Stripped manual type checks and string conversions from `emit_assign`, allowing the emitter to evaluate the expression tree directly.
+- **Expression-Level Edit Masks (`formatters.py`):** Added `format_numeric_edit_mask_expr()` to evaluate numeric edit mask interpolations as first-class expressions rather than statement-level line mutations.
+- **Import Harvesting (`harvester.py`):** Updated `ImportHarvester` to inspect `op == "cast"` nodes directly when collecting required runtime helpers (`unmask_decimal`, `unmask_integer`), standard library imports (`decimal.Decimal`, `datetime`), and math helpers.
+
+---
+
+### 4. Multi-Test Fixture Harness Hardening (`tests/test_fixtures.py`)
+
+- **Multiline Regex Boundary Matching:** Updated `TEST_HEADER_RE` with `re.MULTILINE` and optional whitespace trimming (`^\s*===\s*TEST:\s*(.+?)\s*===\s*$`).
+- **Resilient Chunk Parsing:** Fixed `split_test_file()` to split multi-test files even when leading newlines or indentation are present, preventing multi-test fixtures from collapsing into a single failing run.
+
+---
+
+### 5. Integration Test Coverage (`tests/fixtures/type_coercion_casts.test`)
+
+Added an 8-part integration fixture verifying semantic typing, code generation, and in-memory execution:
+
+| Sub-Test Name | Verification Focus |
+| --- | --- |
+| `widen_and_narrow` | Explicit `int` $\to$ `Decimal` promotion and `Decimal` $\to$ `int` narrowing with positive/negative values. |
+| `unmask_numeric` | Standard formatted strings with currency symbols and trailing signs unmasking to `Decimal` and `int`. |
+| `unmask_accounting` | Accounting credit/debit suffixes (`CR`, `DB`) and parenthesized negatives `(val)` unmasking to negative `Decimal` values. |
+| `date_format_and_parse` | Bidirectional date transformations (`A8` $\to$ `D` and `D` $\to$ `A10`) via edit masks. |
+| `numeric_edit_mask` | Formatted numeric string interpolation with thousands commas and trailing signs. |
+| `stringify_primitives` | Primitive stringification across integers, decimals, and booleans. |
+| `division_to_int_narrow` | Division operations narrowed into integer destinations. |
+| `function_return_coercion` | Cross-boundary return value casting in user-defined functions (`DEFINE FUNCTION`). |
+
+---
+
+### 6. Architectural Critique & Roadmap (`CRITIQUE.md`)
+
+- Updated `CRITIQUE.md` to reflect completed milestones: regex micro-parser eradication, pluggable `TargetBackend` architecture, modular `natural_runtime` packages, and golden-master snapshot testing.
+- Formulated the next strategic roadmap covering Schema IR (IR-S) generation (Prisma/DDL/OpenAPI 3.0), relational normalization passes for `PE`/`MU` groups, and AST program slicing for REST API + React UI modernization.

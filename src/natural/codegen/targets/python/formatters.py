@@ -8,8 +8,8 @@ def convert_edit_mask(mask: str) -> str:
     return mask.replace("YYYY", "%Y").replace("YY", "%y").replace("MM", "%m").replace("DD", "%d")
 
 
-def format_numeric_edit_mask(target: str, src_ref: str, mask: str) -> str:
-    """Emits formatted Python f-string interpolation for Natural numeric edit masks."""
+def format_numeric_edit_mask_expr(src_ref: str, mask: str) -> str:
+    """Emits formatted Python f-string interpolation expression for Natural numeric edit masks."""
     raw_mask = mask.strip().upper()
 
     has_currency = "$" in raw_mask
@@ -76,4 +76,10 @@ def format_numeric_edit_mask(target: str, src_ref: str, mask: str) -> str:
     elif prefix_sign == "-":
         prefix_code += f"{{'-' if {src_ref} < 0 else ' '}}"
 
-    return f'{target} = f"{prefix_code}{{{value_expr}:{fmt_spec}}}{suffix_code}"'
+    return f'f"{prefix_code}{{{value_expr}:{fmt_spec}}}{suffix_code}"'
+
+
+def format_numeric_edit_mask(target: str, src_ref: str, mask: str) -> str:
+    """Emits formatted Python assignment line for Natural numeric edit masks."""
+    expr_str = format_numeric_edit_mask_expr(src_ref, mask)
+    return f"{target} = {expr_str}"
