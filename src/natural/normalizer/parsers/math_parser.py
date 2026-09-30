@@ -8,7 +8,7 @@ from typing import List
 from natural.ir.models import AssignStatement, Expression
 from natural.normalizer.parsers.expression_parser import SHARED_EXPR_GRAMMAR, ExpressionTransformer
 
-math_grammar = f"""
+math_grammar = rf"""
     ?start: math_stmt
     ?math_stmt: add_stmt | sub_stmt | mult_stmt | div_stmt
 
@@ -28,14 +28,9 @@ math_grammar = f"""
 """
 
 class MathTransformer(ExpressionTransformer):
-    def rounded_flag(self, children):
-        return True
-
-    def giving_clause(self, children):
-        return ("giving", children[0])
-
-    def remainder_clause(self, children):
-        return ("remainder", children[0])
+    def rounded_flag(self, children): return True
+    def giving_clause(self, children): return ("giving", children[0])
+    def remainder_clause(self, children): return ("remainder", children[0])
 
     def to_dest(self, children):
         giving = next((c for c in children if isinstance(c, tuple) and c[0] == "giving"), None)
@@ -81,13 +76,9 @@ class MathTransformer(ExpressionTransformer):
     def mult_stmt(self, children):
         is_rounded = True in children
         exprs = [c for c in children if isinstance(c, Expression)]
-        val1 = exprs[0]
-        val2 = exprs[1]
+        binary_expr = Expression(kind="binary_op", operator="*", left=exprs[0], right=exprs[1])
         giving = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "giving"), None)
-
-        binary_expr = Expression(kind="binary_op", operator="*", left=val1, right=val2)
-        out_target = giving if giving else val1
-        return [AssignStatement(target=out_target, value=binary_expr, rounded=is_rounded)]
+        return [AssignStatement(target=giving if giving else exprs[0], value=binary_expr, rounded=is_rounded)]
 
     def div_stmt(self, children):
         is_rounded = True in children
@@ -104,7 +95,6 @@ class MathTransformer(ExpressionTransformer):
         if remainder:
             rem_expr = Expression(kind="binary_op", operator="%", left=target_expr, right=val_expr)
             rem_stmt = AssignStatement(target=remainder, value=rem_expr, rounded=False)
-            # Guarantee remainder happens first in codegen
             return [rem_stmt, quot_stmt]
 
         return [quot_stmt]

@@ -7,7 +7,7 @@ from lark import Lark
 from natural.ir.models import ForStatement, Expression
 from natural.normalizer.parsers.expression_parser import SHARED_EXPR_GRAMMAR, ExpressionTransformer
 
-for_grammar = f"""
+for_grammar = rf"""
     ?start: for_stmt
     
     for_stmt: VAR_NAME ":=" expr "TO"i expr step_clause?
@@ -17,16 +17,13 @@ for_grammar = f"""
 """
 
 class ForTransformer(ExpressionTransformer):
-    def step_clause(self, children):
-        return ("step", children[0])
+    def step_clause(self, children): return ("step", children[0])
 
     def for_stmt(self, children):
         var_name = str(children[0])
         exprs = [c for c in children if isinstance(c, Expression)]
-
         start_expr = exprs[0]
         end_expr = exprs[1]
-
         step_tup = next((c for c in children if isinstance(c, tuple) and c[0] == "step"), None)
         step_expr = step_tup[1] if step_tup else None
 

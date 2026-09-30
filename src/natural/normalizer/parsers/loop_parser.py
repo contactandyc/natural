@@ -1,34 +1,40 @@
+# src/natural/normalizer/parsers/loop_parser.py
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
-# Maintainer: Andy Curtis <contactandyc@gmail.com>
 
 import re
-from natural.ir.models import LoopStatement
-from natural.normalizer.parsers.expression_parser import ExpressionParser
+from lark import Lark
+from natural.ir.models import LoopStatement, Expression
+from natural.normalizer.parsers.expression_parser import SHARED_EXPR_GRAMMAR, ExpressionTransformer
+
+loop_grammar = rf"""
+    ?start: loop_stmt
+    
+    loop_stmt: loop_kw expr
+    
+    loop_kw: "UNTIL"i -> until_kw
+           | "WHILE"i -> while_kw
+
+    {SHARED_EXPR_GRAMMAR}
+"""
+
+class LoopTransformer(ExpressionTransformer):
+    def until_kw(self, children): return "UNTIL"
+    def while_kw(self, children): return "WHILE"
+
+    def loop_stmt(self, children):
+        loop_type = children[0]
+        expr = next(c for c in children if isinstance(c, Expression))
+        return LoopStatement(loop_type=loop_type, condition=expr, body=[])
 
 class LoopParser:
     def __init__(self):
-        self.expr_parser = ExpressionParser()
-        self.condition_pattern = re.compile(r"^\s*(UNTIL|WHILE)\s+(.+)$", re.IGNORECASE)
+        self.parser = Lark(loop_grammar, parser="lalr")
+        self.transformer = LoopTransformer()
 
     def parse(self, raw_clause: str) -> LoopStatement:
-        # Strip trailing inline comments: /* ...
         clean_clause = re.sub(r"/\*.*$", "", raw_clause).strip()
-
         if not clean_clause:
             return LoopStatement(loop_type="INFINITE", condition=None, body=[])
-
-        match = self.condition_pattern.match(clean_clause)
-        if not match:
-            raise ValueError(f"Invalid REPEAT clause syntax: {raw_clause}")
-
-        loop_type = match.group(1).upper()
-        raw_expr = re.sub(r"/\*.*$", "", match.group(2)).strip()
-
-        parsed_cond = self.expr_parser.parse(raw_expr)
-
-        return LoopStatement(
-            loop_type=loop_type,
-            condition=parsed_cond,
-            body=[]
-        )
+        tree = self.parser.parse(clean_clause)
+        return self.transformer.transform(tree)

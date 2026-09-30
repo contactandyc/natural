@@ -1,13 +1,13 @@
+# src/natural/normalizer/parsers/assign_parser.py
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
-# Maintainer: Andy Curtis <contactandyc@gmail.com>
 
 import re
 from lark import Lark
 from natural.ir.models import AssignStatement, Expression
 from natural.normalizer.parsers.expression_parser import SHARED_EXPR_GRAMMAR, ExpressionTransformer, ExpressionParser
 
-assign_grammar = f"""
+assign_grammar = rf"""
     ?start: assign_stmt
     
     assign_stmt: assign_kw? rounded_flag? expr assign_op expr
@@ -20,20 +20,12 @@ assign_grammar = f"""
 """
 
 class AssignTransformer(ExpressionTransformer):
-    def rounded_flag(self, children):
-        return True
+    def rounded_flag(self, children): return True
 
     def assign_stmt(self, children):
-        # Extract expressions (target and value)
         exprs = [c for c in children if isinstance(c, Expression)]
-        # Check if the ROUNDED flag was caught
         is_rounded = True in children
-
-        return AssignStatement(
-            target=exprs[0],
-            value=exprs[1],
-            rounded=is_rounded
-        )
+        return AssignStatement(target=exprs[0], value=exprs[1], rounded=is_rounded)
 
 class AssignParser:
     def __init__(self):

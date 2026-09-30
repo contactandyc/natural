@@ -1,46 +1,46 @@
+# src/natural/normalizer/parsers/workfile_parser.py
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 
 import re
-from natural.ir.models import WriteWorkFileStatement, CloseWorkFileStatement, ReadWorkFileStatement
-from natural.normalizer.parsers.expression_parser import ExpressionParser
+from lark import Lark
+from natural.ir.models import WriteWorkFileStatement, CloseWorkFileStatement, ReadWorkFileStatement, Expression
+from natural.normalizer.parsers.expression_parser import SHARED_EXPR_GRAMMAR, ExpressionTransformer
 
+wf_grammar = rf"""
+    ?start: wf_stmt
+    ?wf_stmt: write_wf_stmt | read_wf_stmt | close_wf_stmt
+    
+    write_wf_stmt: "WRITE"i "WORK"i ["FILE"i] NUMBER expr+
+    read_wf_stmt: ["FILE"i] NUMBER ["RECORD"i] expr*
+    close_wf_stmt: "CLOSE"i "WORK"i ["FILE"i] NUMBER
+    
+    {SHARED_EXPR_GRAMMAR}
+"""
+
+class WorkFileTransformer(ExpressionTransformer):
+    def write_wf_stmt(self, children):
+        return WriteWorkFileStatement(file_number=int(children[0]), fields=[c for c in children if isinstance(c, Expression)])
+
+    def read_wf_stmt(self, children):
+        return ReadWorkFileStatement(label=None, file_number=int(children[0]), fields=[c for c in children if isinstance(c, Expression)], body=[])
+
+    def close_wf_stmt(self, children):
+        return CloseWorkFileStatement(file_number=int(children[0]))
 
 class WorkFileParser:
     def __init__(self):
-        self.expr_parser = ExpressionParser()
-        self.write_pattern = re.compile(r"^\s*WRITE\s+WORK\s+(?:FILE\s+)?(\d+)\s+(.+)$", re.IGNORECASE)
-        self.close_pattern = re.compile(r"^\s*CLOSE\s+WORK\s+(?:FILE\s+)?(\d+)\s*$", re.IGNORECASE)
-        self.read_pattern = re.compile(r"^\s*(?:FILE\s+)?(\d+)(?:\s+RECORD)?(?:\s+(.+))?$", re.IGNORECASE)
+        self.parser = Lark(wf_grammar, parser="lalr")
+        self.transformer = WorkFileTransformer()
 
-    def parse_write(self, raw_statement: str) -> WriteWorkFileStatement:
-        clean = re.sub(r"/\*.*$", "", raw_statement).strip()
-        m = self.write_pattern.match(clean)
-        if not m:
-            raise ValueError(f"Invalid WRITE WORK FILE syntax: {raw_statement}")
-
-        num = int(m.group(1))
-        field_parts = m.group(2).split()
-        fields = [self.expr_parser.parse(f.strip()) for f in field_parts if f.strip()]
-        return WriteWorkFileStatement(file_number=num, fields=fields)
-
-    def parse_close(self, raw_statement: str) -> CloseWorkFileStatement:
-        clean = re.sub(r"/\*.*$", "", raw_statement).strip()
-        m = self.close_pattern.match(clean)
-        if not m:
-            raise ValueError(f"Invalid CLOSE WORK FILE syntax: {raw_statement}")
-        return CloseWorkFileStatement(file_number=int(m.group(1)))
-
+    def parse_write(self, raw_statement: str) -> WriteWorkFileStatement: return self._parse(raw_statement)
+    def parse_close(self, raw_statement: str) -> CloseWorkFileStatement: return self._parse(raw_statement)
     def parse_read_clause(self, raw_clause: str, label: str = None) -> ReadWorkFileStatement:
-        clean = re.sub(r"/\*.*$", "", raw_clause).strip()
-        m = self.read_pattern.match(clean)
-        if not m:
-            raise ValueError(f"Invalid READ WORK FILE syntax: {raw_clause}")
+        stmt = self._parse(raw_clause)
+        stmt.label = label
+        return stmt
 
-        num = int(m.group(1))
-        fields = []
-        if m.group(2):
-            field_parts = m.group(2).split()
-            fields = [self.expr_parser.parse(f.strip()) for f in field_parts if f.strip()]
-
-        return ReadWorkFileStatement(label=label, file_number=num, fields=fields, body=[])
+    def _parse(self, raw_statement: str):
+        clean = re.sub(r"/\*.*$", "", raw_statement).strip()
+        tree = self.parser.parse(clean)
+        return self.transformer.transform(tree)

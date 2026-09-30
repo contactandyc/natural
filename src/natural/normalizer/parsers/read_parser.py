@@ -1,93 +1,76 @@
+# src/natural/normalizer/parsers/read_parser.py
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 
 import re
-from lark import Lark, Transformer
+from lark import Lark
 from natural.ir.models import ReadStatement, HistogramStatement, Expression
-from natural.normalizer.parsers.expression_parser import ExpressionParser
+from natural.normalizer.parsers.expression_parser import SHARED_EXPR_GRAMMAR, ExpressionTransformer
 
-read_grammar = r"""
-    ?start: read_clause
+read_grammar = rf"""
+    ?start: read_stmt | hist_stmt
     
-    read_clause: [limit] view_name ["BY"i descriptor] ["STARTING"i ["FROM"i] operand]
+    read_stmt: limit_clause? VAR_NAME by_clause? starting_clause? thru_clause?
+    hist_stmt: limit_clause? VAR_NAME "FOR"i VAR_NAME starting_clause? thru_clause?
     
-    limit: "(" NUMBER ")"
-    view_name: /[A-Z0-9\-\_]+/
-    descriptor: /[A-Z0-9\-\_]+/
-    operand: /[A-Z0-9\-\_\#]+/ | NUMBER | STRING
-    
-    NUMBER: /\d+/
-    STRING: /'[^']*'/
-    
-    %import common.WS
-    %ignore WS
+    limit_clause: "(" NUMBER ")"
+    by_clause: "BY"i VAR_NAME
+    starting_clause: "STARTING"i ["FROM"i] expr
+    thru_clause: "THRU"i expr
+
+    {SHARED_EXPR_GRAMMAR}
 """
 
+class ReadTransformer(ExpressionTransformer):
+    def limit_clause(self, children): return ("limit", int(children[0]))
+    def by_clause(self, children): return ("by", str(children[0]))
+    def starting_clause(self, children): return ("starting", children[0])
+    def thru_clause(self, children): return ("thru", children[0])
 
-class ReadTransformer(Transformer):
-    def view_name(self, tokens):
-        return ("view", str(tokens[0]))
+    def read_stmt(self, children):
+        limit = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "limit"), None)
+        view_name = next(str(c) for c in children if getattr(c, "type", None) == "VAR_NAME")
 
-    def descriptor(self, tokens):
-        return ("desc", str(tokens[0]))
+        by_desc = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "by"), None)
+        starting = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "starting"), None)
+        thru = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "thru"), None)
 
-    def limit(self, tokens):
-        return ("limit", int(tokens[0]))
+        return ReadStatement(
+            view_name=view_name.upper(),
+            by_descriptor=by_desc.upper() if by_desc else None,
+            starting_from=starting,
+            thru_value=thru,
+            limit=limit,
+            body=[]
+        )
 
-    def operand(self, tokens):
-        val = str(tokens[0])
-        kind = "literal" if val.isdigit() or val.startswith("'") else "ref"
-        return Expression(kind=kind, value=val.strip("'"))
+    def hist_stmt(self, children):
+        limit = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "limit"), None)
+        vars = [str(c) for c in children if getattr(c, "type", None) == "VAR_NAME"]
 
-    def read_clause(self, children):
-        stmt = ReadStatement(view_name="", body=[])
+        starting = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "starting"), None)
+        thru = next((c[1] for c in children if isinstance(c, tuple) and c[0] == "thru"), None)
 
-        for child in children:
-            if isinstance(child, tuple):
-                if child[0] == "view":
-                    stmt.view_name = child[1]
-                elif child[0] == "desc":
-                    stmt.by_descriptor = child[1]
-                elif child[0] == "limit":
-                    stmt.limit = child[1]
-            elif isinstance(child, Expression):
-                stmt.starting_from = child
-
-        return stmt
-
+        return HistogramStatement(
+            view_name=vars[0].upper(),
+            descriptor=vars[1].upper(),
+            starting_from=starting,
+            thru_value=thru,
+            limit=limit,
+            body=[]
+        )
 
 class ReadParser:
     def __init__(self):
         self.parser = Lark(read_grammar, parser="lalr")
         self.transformer = ReadTransformer()
-        self.expr_parser = ExpressionParser()
-        self.histogram_pattern = re.compile(
-            r"^\s*(?:\((\d+)\)\s+)?([A-Za-z0-9\-_]+)\s+FOR\s+([A-Za-z0-9\-_]+)(?:\s+STARTING\s+(?:FROM\s+)?([^\s]+))?(?:\s+THRU\s+([^\s]+))?\s*$",
-            re.IGNORECASE,
-        )
 
     def parse(self, raw_clause: str) -> ReadStatement:
-        clean_clause = re.sub(r"/\*.*$", "", raw_clause).strip()
-        tree = self.parser.parse(clean_clause)
+        clean = re.sub(r"/\*.*$", "", raw_clause).strip()
+        tree = self.parser.parse(clean)
         return self.transformer.transform(tree)
 
     def parse_histogram(self, raw_clause: str) -> HistogramStatement:
         clean = re.sub(r"/\*.*$", "", raw_clause).strip()
-        m = self.histogram_pattern.match(clean)
-        if not m:
-            raise ValueError(f"Invalid HISTOGRAM syntax: {raw_clause}")
-
-        limit = int(m.group(1)) if m.group(1) else None
-        view_name = m.group(2).upper()
-        descriptor = m.group(3).upper()
-        starting_from = self.expr_parser.parse(m.group(4).strip()) if m.group(4) else None
-        thru_value = self.expr_parser.parse(m.group(5).strip()) if m.group(5) else None
-
-        return HistogramStatement(
-            view_name=view_name,
-            descriptor=descriptor,
-            starting_from=starting_from,
-            thru_value=thru_value,
-            limit=limit,
-            body=[],
-        )
+        tree = self.parser.parse(clean)
+        return self.transformer.transform(tree)

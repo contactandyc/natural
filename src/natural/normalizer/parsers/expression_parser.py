@@ -1,3 +1,4 @@
+# src/natural/normalizer/parsers/expression_parser.py
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
@@ -9,34 +10,36 @@ from natural.ir.models import Expression, SubstringSpec
 
 # Expose the base grammar so other micro-parsers can compose it
 SHARED_EXPR_GRAMMAR = r"""
+    ?expr: logical_or
+
     ?logical_or: logical_and
                | logical_or LOGICAL_OR logical_and   -> binary_expr
 
     ?logical_and: comparison
                 | logical_and LOGICAL_AND comparison -> binary_expr
 
-    ?comparison: expr
-               | comparison COMP_OP expr              -> binary_expr
+    ?comparison: arithmetic_expr
+               | comparison COMP_OP arithmetic_expr  -> binary_expr
 
-    ?expr: term
-         | expr ADD_OP term                           -> binary_expr
+    ?arithmetic_expr: term
+         | arithmetic_expr ADD_OP term               -> binary_expr
 
     ?term: power
-         | term MULT_OP power                         -> binary_expr
+         | term MULT_OP power                        -> binary_expr
 
     ?power: factor
-          | power POWER_OP factor                     -> binary_expr
+          | power POWER_OP factor                    -> binary_expr
 
-    ?factor: NUMBER                                   -> num_lit
-           | STRING                                   -> str_lit
-           | DATE_LITERAL                             -> date_lit
-           | BOOLEAN_LITERAL                          -> bool_lit
-           | SYSTEM_VAR                               -> sys_var
-           | substring_func                           -> substring_expr
-           | VAR_NAME "(" [RAW_BRACKET] ")"           -> var_with_bracket
-           | VAR_NAME                                 -> var_ref
+    ?factor: NUMBER                                  -> num_lit
+           | STRING                                  -> str_lit
+           | DATE_LITERAL                            -> date_lit
+           | BOOLEAN_LITERAL                         -> bool_lit
+           | SYSTEM_VAR                              -> sys_var
+           | substring_func                          -> substring_expr
+           | VAR_NAME "(" [RAW_BRACKET] ")"          -> var_with_bracket
+           | VAR_NAME                                -> var_ref
            | tuple_expr
-           | "(" logical_or ")"
+           | "(" expr ")"                            -> parens
 
     tuple_expr: "(" expr ("," expr)+ ")"
     substring_func: "SUBSTRING"i "(" VAR_NAME "," expr ("," expr)? ")"
@@ -60,7 +63,7 @@ SHARED_EXPR_GRAMMAR = r"""
     %ignore WS
 """
 
-expr_grammar = "?start: logical_or\n" + SHARED_EXPR_GRAMMAR
+expr_grammar = "?start: expr\n" + SHARED_EXPR_GRAMMAR
 
 def _split_args(content: str) -> List[str]:
     args = []
@@ -121,6 +124,10 @@ class ExpressionTransformer(Transformer):
         var_name = str(tokens[0])
         return Expression(kind="ref", value=var_name)
 
+    def parens(self, children):
+        # Prevents parenthetical expressions from leaking Lark Trees into the AST
+        return children[0]
+
     def tuple_expr(self, children):
         elements = [c for c in children if isinstance(c, Expression)]
         return Expression(kind="tuple", array_indices=elements)
@@ -129,7 +136,6 @@ class ExpressionTransformer(Transformer):
         var_name = str(tokens[0])
         raw_content = str(tokens[1]).strip() if len(tokens) > 1 and tokens[1] is not None else ""
 
-        # Safely extract and attach Edit Masks (EM=...) to the Expression
         if raw_content.upper().startswith("EM="):
             return Expression(
                 kind="ref",

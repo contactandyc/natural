@@ -1,91 +1,65 @@
+# src/natural/normalizer/parsers/io_parser.py
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 
 import re
 from typing import Optional
-from lark import Lark, Transformer
+from lark import Lark
 from natural.ir.models import PrintStatement, WriteStatement, InputStatement, Expression
-from natural.normalizer.parsers.expression_parser import ExpressionParser
+from natural.normalizer.parsers.expression_parser import SHARED_EXPR_GRAMMAR, ExpressionTransformer, ExpressionParser
 
-io_grammar = r"""
-    ?start: io_clause
-
-    io_clause: IO_CMD io_operand*
-
-    IO_CMD: "PRINT"i | "WRITE"i | "INPUT"i
-
+io_grammar = rf"""
+    ?start: io_stmt
+    
+    io_stmt: io_cmd io_operand*
+    
+    io_cmd: "PRINT"i -> print_cmd
+          | "WRITE"i -> write_cmd
+          | "INPUT"i -> input_cmd
+    
     ?io_operand: modifier
                | str_with_repeat
-               | var_ref
                | WRITE_TAB       -> write_tab
-               | NUMBER          -> num_lit
-               | STRING          -> str_lit
                | NEWLINE_SPLIT   -> newline
+               | expr
 
     str_with_repeat: STRING "(" NUMBER ")"
     modifier: "(" /[a-zA-Z0-9_]+=[^)]+/i ")"
-
-    var_ref: VAR_NAME (PAREN_DIM | "(" /[^)]+/ ")")?
-
-    PAREN_DIM: /\s*\([^)]+\)/
-
-    VAR_NAME: /[*#\+][A-Za-z0-9\-_]+((\.|\/)[A-Za-z0-9\-_]+)*/ | /[A-Za-z0-9\-_]+(\.|\/)[A-Za-z0-9\-_]+/ | /[A-Za-z][A-Za-z0-9\-_]*/
-
+    
     NEWLINE_SPLIT: "/"
     WRITE_TAB.5: /\d+[Tt]/
-    NUMBER.2: /\d+(\.\d+)?/
-    STRING: /'[^']*'/ | /"[^"]*"/
-
-    %import common.WS
-    %ignore WS
+    
+    {SHARED_EXPR_GRAMMAR}
 """
 
-
-class IOTransformer(Transformer):
+class IOTransformer(ExpressionTransformer):
     def __init__(self, expr_parser: Optional[ExpressionParser] = None):
         super().__init__()
         self.expr_parser = expr_parser or ExpressionParser()
 
-    def modifier(self, tokens):
+    def print_cmd(self, children): return ("cmd", "PRINT")
+    def write_cmd(self, children): return ("cmd", "WRITE")
+    def input_cmd(self, children): return ("cmd", "INPUT")
+
+    def modifier(self, children):
         return None
 
-    def str_with_repeat(self, tokens):
-        base_str = str(tokens[0])[1:-1]
-        count = int(tokens[1])
+    def str_with_repeat(self, children):
+        base_str = str(children[0])[1:-1]
+        count = int(children[1])
         return Expression(kind="literal", value=base_str * count)
 
-    def num_lit(self, tokens):
-        val = str(tokens[0])
-        parsed = float(val) if "." in val else int(val)
-        return Expression(kind="literal", value=parsed)
-
-    def str_lit(self, tokens):
-        return Expression(kind="literal", value=str(tokens[0])[1:-1])
-
-    def var_ref(self, tokens):
-        var_name = str(tokens[0])
-        dim = str(tokens[1]).strip() if len(tokens) > 1 and tokens[1] is not None else None
-        if dim:
-            clean_dim = dim.strip()
-            if clean_dim.startswith("(") and clean_dim.endswith(")"):
-                clean_dim = clean_dim[1:-1].strip()
-            try:
-                return self.expr_parser.parse(f"{var_name}({clean_dim})")
-            except Exception:
-                return Expression(kind="ref", value=var_name, array_dim=dim)
-        return Expression(kind="ref", value=var_name)
-
-    def newline(self, tokens):
+    def newline(self, children):
         return Expression(kind="newline", value="/")
 
-    def write_tab(self, tokens):
-        val_str = str(tokens[0]).strip().upper()
+    def write_tab(self, children):
+        val_str = str(children[0]).strip().upper()
         col = int(val_str[:-1])
         return Expression(kind="tab", value=col)
 
-    def io_clause(self, children):
-        cmd = str(children[0]).upper()
-        items = [c for c in children[1:] if c is not None]
+    def io_stmt(self, children):
+        cmd = next(c[1] for c in children if isinstance(c, tuple) and c[0] == "cmd")
+        items = [c for c in children if c is not None and not isinstance(c, tuple)]
 
         if cmd == "PRINT":
             return PrintStatement(fields=items)
@@ -95,7 +69,6 @@ class IOTransformer(Transformer):
             return InputStatement(fields=items, modifiers=[])
 
         raise ValueError(f"Unknown IO command: {cmd}")
-
 
 class IOParser:
     def __init__(self):

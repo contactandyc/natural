@@ -843,3 +843,7 @@ Upgraded `tests/test_fixtures.py` to support multiple distinct test cases within
 - **Logical Chunking:** Introduced `=== TEST: <name> ===` boundaries to logically group related edge cases (e.g., `compress.basic_compress`, `compress.leaving_no_space`).
 - **Pytest Parametrization:** Mapped sub-tests directly into pytest IDs, enabling targeted execution via dot-notation (e.g., `./build.sh test at_break.sub_test1`).
 - **Stateful Blessing:** Implemented a session-scoped `bless_session_manager` fixture. When running `--bless` on a targeted subset of tests, it isolates the new outputs in memory and safely performs a single read-modify-write on teardown, preventing file I/O collisions or the deletion of un-run tests.
+
+---
+
+# Chat - Continuing hardening the micro-parsers - https://share.gemini.google/BxqKu7HRarYZ

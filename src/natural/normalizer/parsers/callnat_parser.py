@@ -1,38 +1,25 @@
+# src/natural/normalizer/parsers/callnat_parser.py
 # SPDX-FileCopyrightText: 2026 Andy Curtis <contactandyc@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 
-from lark import Lark, Transformer
+import re
+from lark import Lark
 from natural.ir.models import CallnatStatement, Expression
+from natural.normalizer.parsers.expression_parser import SHARED_EXPR_GRAMMAR, ExpressionTransformer
 
-callnat_grammar = r"""
-    ?start: callnat_clause
+callnat_grammar = rf"""
+    ?start: callnat_stmt
     
-    callnat_clause: "CALLNAT"i subprogram_name operand*
+    callnat_stmt: "CALLNAT"i STRING expr*
     
-    subprogram_name: STRING
-    operand: /[A-Z0-9\-\_\#\.\(\)]+/ | NUMBER | STRING
-    
-    NUMBER: /\d+(\.\d+)?/
-    STRING: /'[^']*'/ | /"[^"]*"/
-    
-    %import common.WS
-    %ignore WS
+    {SHARED_EXPR_GRAMMAR}
 """
 
-class CallnatTransformer(Transformer):
-    def subprogram_name(self, tokens):
-        return str(tokens[0])[1:-1] # Strip quotes
-
-    def operand(self, tokens):
-        val = str(tokens[0])
-        kind = "literal" if val.isdigit() or val.startswith("'") or val.startswith('"') else "ref"
-        return Expression(kind=kind, value=val.strip("'\""))
-
-    def callnat_clause(self, children):
-        return CallnatStatement(
-            subprogram_name=children[0],
-            parameters=children[1:]
-        )
+class CallnatTransformer(ExpressionTransformer):
+    def callnat_stmt(self, children):
+        subprogram = str(children[0])[1:-1]
+        exprs = [c for c in children if isinstance(c, Expression)]
+        return CallnatStatement(subprogram_name=subprogram, parameters=exprs)
 
 class CallnatParser:
     def __init__(self):
@@ -40,5 +27,6 @@ class CallnatParser:
         self.transformer = CallnatTransformer()
 
     def parse(self, raw_clause: str) -> CallnatStatement:
-        tree = self.parser.parse(raw_clause)
+        clean = re.sub(r"/\*.*$", "", raw_clause).strip()
+        tree = self.parser.parse(clean)
         return self.transformer.transform(tree)
