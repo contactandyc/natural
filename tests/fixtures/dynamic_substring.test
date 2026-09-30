@@ -11,6 +11,8 @@ END-DEFINE
 #MOD(#START:#LEN) := 'XYZ'
 
 === PYTHON ===
+from natural_runtime import slice_assign
+
 class DynamicSubstringContext:
     def __init__(self):
         self.src = ""
@@ -22,7 +24,7 @@ class DynamicSubstringContext:
 def execute_dynamic_substring(ctx: DynamicSubstringContext, session):
     ctx.sub = ctx.src[(ctx.start - 1):(ctx.start - 1) + ctx.len]
     ctx.mod = ctx.src
-    ctx.mod = ctx.mod[:(ctx.start - 1)] + str('XYZ') + ctx.mod[((ctx.start - 1) + ctx.len):]
+    ctx.mod = slice_assign(ctx.mod, ctx.start, ctx.len, 'XYZ')
     return ctx
 
 === EXECUTE ===

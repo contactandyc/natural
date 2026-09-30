@@ -19,6 +19,7 @@ MOVE #STR_PAR TO #NUM_PAR
 
 === PYTHON ===
 from decimal import Decimal
+from natural_runtime import unmask_decimal
 
 class MoveUnmaskDecimalContext:
     def __init__(self):
@@ -34,26 +35,11 @@ class MoveUnmaskDecimalContext:
         self.num_par = Decimal('0')
 
 def execute_move_unmask_decimal(ctx: MoveUnmaskDecimalContext, session):
-    _val = ctx.str_pos.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')
-    _is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))
-    _num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()
-    ctx.num_pos = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))
-    _val = ctx.str_neg.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')
-    _is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))
-    _num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()
-    ctx.num_neg = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))
-    _val = ctx.str_cr.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')
-    _is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))
-    _num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()
-    ctx.num_cr = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))
-    _val = ctx.str_db.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')
-    _is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))
-    _num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()
-    ctx.num_db = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))
-    _val = ctx.str_par.strip().replace('$', '').replace(',', '').replace(' ', '').replace('+', '')
-    _is_neg = _val.endswith('-') or _val.startswith('-') or _val.endswith(('CR', 'DB')) or (_val.startswith('(') and _val.endswith(')'))
-    _num = _val.rstrip('-CRDBcrdb').lstrip('-+(').rstrip(')').strip()
-    ctx.num_par = -Decimal(_num) if _is_neg else (Decimal(_num) if _num else Decimal('0'))
+    ctx.num_pos = unmask_decimal(ctx.str_pos)
+    ctx.num_neg = unmask_decimal(ctx.str_neg)
+    ctx.num_cr = unmask_decimal(ctx.str_cr)
+    ctx.num_db = unmask_decimal(ctx.str_db)
+    ctx.num_par = unmask_decimal(ctx.str_par)
     return ctx
 
 === EXECUTE ===

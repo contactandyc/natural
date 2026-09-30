@@ -6,14 +6,16 @@ END-DEFINE
 WRITE 5T 'A' 35T 'B' / 5T 'C'
 
 === PYTHON ===
+from natural_runtime import tab, tabulate
+
 class IoTabulationContext:
     def __init__(self):
         self.status = ""
 
 def execute_io_tabulation(ctx: IoTabulationContext, session):
     ctx.status = 'COMPLETED'
-    print(" " * 4 + "A" + " " * max(0, 34 - len("    A")) + "B")
-    print(" " * 4 + "C")
+    print(tabulate(tab(5), 'A', tab(35), 'B'))
+    print(tabulate(tab(5), 'C'))
     return ctx
 
 === EXECUTE ===

@@ -9,6 +9,8 @@ MOVE ALL '*' TO #FIELD_A
 #FIELD_A(1:4) := 'INIT'
 
 === PYTHON ===
+from natural_runtime import slice_assign
+
 class MoveAllAndSubstringContext:
     def __init__(self):
         self.field_a = ""
@@ -18,7 +20,7 @@ class MoveAllAndSubstringContext:
 def execute_move_all_and_substring(ctx: MoveAllAndSubstringContext, session):
     ctx.field_a = str('*') * 10
     ctx.slice = ctx.field_b[(1 - 1):(1 - 1) + 4]
-    ctx.field_a = ctx.field_a[:(1 - 1)] + str('INIT') + ctx.field_a[((1 - 1) + 4):]
+    ctx.field_a = slice_assign(ctx.field_a, 1, 4, 'INIT')
     return ctx
 
 === EXECUTE ===

@@ -23,6 +23,8 @@ REDUCE ARRAY #ARR TO (1:#SZ)
 #FINAL_SZ := *OCC(#ARR)
 
 === PYTHON ===
+from natural_runtime import expand_array, reduce_array
+
 class ArrayLifecycleContext:
     def __init__(self):
         self.elem1 = ""
@@ -33,17 +35,15 @@ class ArrayLifecycleContext:
 
 def execute_array_lifecycle(ctx: ArrayLifecycleContext, session):
     ctx.sz = 3
-    _diff = max(0, int(ctx.sz) - len(ctx.arr))
-    ctx.arr.extend([None] * _diff)
+    expand_array(ctx.arr, ctx.sz)
     ctx.arr[0] = 'ALPHA'
     ctx.arr[1] = 'BETA'
     ctx.arr[2] = 'GAMMA'
     ctx.sz = 5
-    _diff = max(0, int(ctx.sz) - len(ctx.arr))
-    ctx.arr.extend([None] * _diff)
+    expand_array(ctx.arr, ctx.sz)
     ctx.arr[3] = 'DELTA'
     ctx.sz = 2
-    del ctx.arr[int(ctx.sz):]
+    reduce_array(ctx.arr, ctx.sz)
     ctx.elem1 = ctx.arr[0]
     ctx.elem2 = ctx.arr[1]
     ctx.final_sz = len(ctx.arr)

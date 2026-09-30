@@ -27,6 +27,7 @@ END-READ
 END
 
 === PYTHON: sample.py ===
+from natural_runtime import tab, tabulate
 from target_orm import Employees
 
 class SampleContext:
@@ -36,15 +37,15 @@ class SampleContext:
 def execute_sample(ctx: SampleContext, session):
     for loop_idx, record in enumerate(session.query(Employees).filter((Employees.name >= 'SMITH')).limit(1), 1):
         loop_counter = loop_idx
-        print(" " * 4 + str(record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 5)]) + " " * max(0, 34 - len("    " + str(record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 5)]))) + "<== LANG (1:6) AFTER READ")
+        print(tabulate(tab(5), record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 5)], tab(35), '<== LANG (1:6) AFTER READ'))
         record.lang[0][0] = '***'
         ctx.offset = 2
-        print(" " * 4 + str(record.lang[0][0]) + " " * max(0, 34 - len("    " + str(record.lang[0][0]))) + "<== LANG (1.1) AFTER TWO ASSIGNS")
-        print(" " * 4 + str(record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 4)]) + " " * max(0, 34 - len("    " + str(record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 4)]))) + "<== LANG (2:6) AFTER TWO ASSIGNS")
+        print(tabulate(tab(5), record.lang[0][0], tab(35), '<== LANG (1.1) AFTER TWO ASSIGNS'))
+        print(tabulate(tab(5), record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 4)], tab(35), '<== LANG (2:6) AFTER TWO ASSIGNS'))
         session.flush()  # UPDATE committed for active loop
         myview2_record = session.get(Employees, record.id)
-        print(" " * 4 + str(myview2_record.lang[(1 - 1):(1 - 1) + 6]) + " " * max(0, 34 - len("    " + str(myview2_record.lang[(1 - 1):(1 - 1) + 6]))) + "<== AFTER UPDATE AND GET")
-        print(" " * 4 + "-------------------------------------------------------")
+        print(tabulate(tab(5), myview2_record.lang[(1 - 1):(1 - 1) + 6], tab(35), '<== AFTER UPDATE AND GET'))
+        print(tabulate(tab(5), '-------------------------------------------------------'))
         ctx.offset = 1
     return ctx
 
