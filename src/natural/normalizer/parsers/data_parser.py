@@ -119,6 +119,9 @@ class DataBlockParser:
                         current_group = None
 
                 array_dim = None
+                dim_start = 1
+                dim_end = None
+
                 if second_paren:
                     array_dim = second_paren.strip()
                 elif raw_format and "/" in raw_format:
@@ -128,6 +131,16 @@ class DataBlockParser:
                 elif "DYNAMIC" in line.upper() and not array_dim:
                     array_dim = "*"
 
+                if array_dim:
+                    if ":" in array_dim:
+                        parts = array_dim.split(":", 1)
+                        if parts[0].strip().isdigit() and parts[1].strip().isdigit():
+                            dim_start = int(parts[0].strip())
+                            dim_end = int(parts[1].strip())
+                    elif array_dim.isdigit():
+                        dim_start = 1
+                        dim_end = int(array_dim)
+
                 fmt = self._parse_format(raw_format.strip()) if raw_format else None
 
                 field = DataField(
@@ -135,6 +148,9 @@ class DataBlockParser:
                     name=name,
                     format=fmt,
                     array_dim=array_dim,
+                    max_index=dim_end or 1,
+                    dim_start=dim_start,
+                    dim_end=dim_end,
                     init_val=init_val.strip() if init_val else None,
                     parent_name=current_redefine_target if (level > 1 and current_redefine_target) else None,
                     group_name=current_group if (level > 1 and not current_redefine_target) else None,

@@ -16,6 +16,7 @@ from natural.ir.serializer import serialize_to_yaml
 from natural.normalizer.lowering import SemanticLoweringPass
 from natural.normalizer.pass1_parser import Pass1Parser
 from natural.normalizer.pass2_dispatcher import Pass2Dispatcher
+from natural.normalizer.schema_builder import SchemaBuilder
 from natural.normalizer.workspace import Workspace
 from natural.orchestrator.builder import ProjectBuilder
 
@@ -57,7 +58,8 @@ def parse(
 
         if emit_orm:
             ddms = [area for key, area in workspace._cache.items() if key.startswith("DDM_")]
-            schemas = backend.emit_schema(ddms)
+            catalog = SchemaBuilder(ddms).build_catalog()
+            schemas = backend.emit_schema(catalog)
             result_text = list(schemas.values())[0] if schemas else ""
             lang = "python" if target == "python" else "text"
         elif emit_code or emit_python:

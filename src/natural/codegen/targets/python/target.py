@@ -3,12 +3,14 @@
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Union
 from natural.codegen.target import TargetBackend, register_target
 from natural.codegen.targets.python.engine import PythonEmitter
 from natural.codegen.targets.python.orm import FALLBACK_ORM_SOURCE, ORMEmitter
 from natural.ir.models import DataAreaRef
+from natural.ir.schema import SchemaCatalog
 from natural.ir.semantic import SemanticModule
+from natural.normalizer.schema_builder import SchemaBuilder
 
 
 @register_target("python")
@@ -20,9 +22,14 @@ class PythonTarget(TargetBackend):
         emitter = PythonEmitter(module)
         return emitter.generate(emit_main=emit_main)
 
-    def emit_schema(self, ddms: List[DataAreaRef]) -> Dict[str, str]:
-        if ddms:
-            orm_emitter = ORMEmitter(ddms)
+    def emit_schema(self, schema_source: Union[SchemaCatalog, List[DataAreaRef]]) -> Dict[str, str]:
+        if isinstance(schema_source, SchemaCatalog):
+            catalog = schema_source
+        else:
+            catalog = SchemaBuilder(schema_source).build_catalog()
+
+        if catalog.documents:
+            orm_emitter = ORMEmitter(catalog)
             return {"target_orm.py": orm_emitter.generate()}
         return {"target_orm.py": FALLBACK_ORM_SOURCE}
 

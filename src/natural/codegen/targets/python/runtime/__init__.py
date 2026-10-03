@@ -2,12 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
-from natural.codegen.targets.python.runtime.arrays import expand_array, reduce_array, resize_array
+from natural.codegen.targets.python.runtime.arrays import (
+    KeyedArray,
+    expand_array,
+    reduce_array,
+    resize_array,
+)
 from natural.codegen.targets.python.runtime.slicing import slice_assign
 from natural.codegen.targets.python.runtime.tabulation import Tab, tab, tabulate
 from natural.codegen.targets.python.runtime.unmask import unmask_decimal, unmask_integer
 
 __all__ = [
+    "KeyedArray",
     "unmask_decimal",
     "unmask_integer",
     "Tab",

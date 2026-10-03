@@ -30,6 +30,8 @@ class DataField(BaseModel):
     group_name: Optional[str] = None
     array_dim: Optional[str] = None
     max_index: int = 1
+    dim_start: int = 1
+    dim_end: Optional[int] = None
     is_periodic: bool = False
     is_multiple: bool = False
     init_val: Optional[Any] = None

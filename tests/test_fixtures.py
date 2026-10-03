@@ -18,6 +18,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
 
+from natural.codegen.targets.python.runtime.arrays import KeyedArray
 from natural.orchestrator.builder import ProjectBuilder
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -54,12 +55,16 @@ def split_test_file(content: str, default_stem: str) -> List[Tuple[str, str]]:
     return test_chunks
 
 
-def parse_fixture(raw_text: str, default_stem: str) -> Tuple[Dict[str, str], Dict[str, str], str, bool, bool]:
+def parse_fixture(
+        raw_text: str, default_stem: str
+) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], str, bool, bool, bool]:
     natural_files: Dict[str, str] = {}
+    schema_files: Dict[str, str] = {}
     python_files: Dict[str, str] = {}
     execute_yaml = ""
 
     has_explicit_natural_names = False
+    has_explicit_schema_names = False
     has_explicit_python_names = False
 
     current_kind = None
@@ -67,7 +72,7 @@ def parse_fixture(raw_text: str, default_stem: str) -> Tuple[Dict[str, str], Dic
     buffer = []
 
     def flush():
-        nonlocal buffer, has_explicit_natural_names, has_explicit_python_names, execute_yaml
+        nonlocal buffer, has_explicit_natural_names, has_explicit_schema_names, has_explicit_python_names, execute_yaml
         if current_kind == "NATURAL":
             if current_name:
                 has_explicit_natural_names = True
@@ -75,6 +80,13 @@ def parse_fixture(raw_text: str, default_stem: str) -> Tuple[Dict[str, str], Dic
             else:
                 fname = f"{default_stem}.nsp"
             natural_files[fname] = "\n".join(buffer).strip()
+        elif current_kind == "SCHEMA":
+            if current_name:
+                has_explicit_schema_names = True
+                fname = current_name
+            else:
+                fname = f"{default_stem.lower().replace('-', '_')}.yaml"
+            schema_files[fname] = "\n".join(buffer).strip()
         elif current_kind == "PYTHON":
             if current_name:
                 has_explicit_python_names = True
@@ -96,14 +108,24 @@ def parse_fixture(raw_text: str, default_stem: str) -> Tuple[Dict[str, str], Dic
             buffer.append(line)
     flush()
 
-    return natural_files, python_files, execute_yaml, has_explicit_natural_names, has_explicit_python_names
+    return (
+        natural_files,
+        schema_files,
+        python_files,
+        execute_yaml,
+        has_explicit_natural_names,
+        has_explicit_schema_names,
+        has_explicit_python_names,
+    )
 
 
 def serialize_fixture(
         natural_files: Dict[str, str],
+        schema_files: Dict[str, str],
         python_files: Dict[str, str],
         execute_yaml: str,
         has_explicit_natural_names: bool,
+        has_explicit_schema_names: bool,
         has_explicit_python_names: bool,
 ) -> str:
     sections = []
@@ -114,6 +136,14 @@ def serialize_fixture(
     else:
         for fname, content in natural_files.items():
             sections.append(f"=== NATURAL: {fname} ===\n{content}")
+
+    if schema_files:
+        if not has_explicit_schema_names and len(schema_files) == 1:
+            content = list(schema_files.values())[0]
+            sections.append(f"=== SCHEMA ===\n{content}")
+        else:
+            for fname in sorted(schema_files.keys()):
+                sections.append(f"=== SCHEMA: {fname} ===\n{schema_files[fname]}")
 
     if not has_explicit_python_names and len(python_files) == 1:
         content = list(python_files.values())[0]
@@ -155,8 +185,7 @@ def generate_id(case):
 def bless_session_manager(request):
     """
     Session-scoped fixture that aggregates blessed test chunks.
-    It writes them back to disk all at once when the test suite completes,
-    preventing file I/O collisions and preserving un-run tests in the same file.
+    Writes them back to disk all at once when the test suite completes.
     """
     bless_enabled = request.config.getoption("--bless", default=False)
     accumulator = collections.defaultdict(dict)
@@ -188,9 +217,15 @@ def test_pipeline_and_execution(case_data, request, tmp_path: Path, bless_sessio
     evaluate_enabled = request.config.getoption("--evaluate", default=False)
     verbose_enabled = request.config.getoption("--verbose-test", default=False)
 
-    natural_files, expected_py_files, execute_yaml, has_exp_nat, has_exp_py = parse_fixture(
-        test_content, test_name
-    )
+    (
+        natural_files,
+        expected_schema_files,
+        expected_py_files,
+        execute_yaml,
+        has_exp_nat,
+        has_exp_schema,
+        has_exp_py,
+    ) = parse_fixture(test_content, test_name)
 
     if verbose_enabled:
         title = f" Running: {fixture_path.name} | Test: {test_name} " if has_multiple_tests else f" Running Fixture: {fixture_path.name} "
@@ -204,10 +239,53 @@ def test_pipeline_and_execution(case_data, request, tmp_path: Path, bless_sessio
     builder = ProjectBuilder(tmp_path, target="python")
     builder.compile_workspace(show_diff=False, emit_main=False)
 
+    # 1. Harvest & Validate Schema Documents
+    actual_schema_dir = tmp_path / "build" / "schema"
+    actual_schema_files: Dict[str, str] = {}
+    if actual_schema_dir.exists():
+        for p in actual_schema_dir.glob("*.yaml"):
+            actual_schema_files[p.name] = p.read_text(encoding="utf-8").strip()
+
+    relevant_schema_files: Dict[str, str] = {}
+    if not has_exp_schema and len(expected_schema_files) == 1 and len(actual_schema_files) == 1:
+        expected_key = list(expected_schema_files.keys())[0]
+        actual_key = list(actual_schema_files.keys())[0]
+        relevant_schema_files[expected_key] = actual_schema_files[actual_key]
+    else:
+        for s_name in expected_schema_files:
+            if s_name in actual_schema_files:
+                relevant_schema_files[s_name] = actual_schema_files[s_name]
+
+    if verbose_enabled:
+        for s_name, s_yaml in actual_schema_files.items():
+            console.print(Panel(Syntax(s_yaml, "yaml", line_numbers=True), title=f"[bold green]Emitted Schema: {s_name}[/bold green]"))
+
+    diffs = []
+    for expected_name, expected_schema in expected_schema_files.items():
+        actual_schema = relevant_schema_files.get(expected_name, "")
+        if actual_schema != expected_schema:
+            diff = "\n".join(
+                difflib.unified_diff(
+                    expected_schema.splitlines(),
+                    actual_schema.splitlines(),
+                    fromfile=f"expected/{expected_name}",
+                    tofile=f"actual/{expected_name}",
+                    lineterm="",
+                )
+            )
+            diffs.append(f"Schema mismatch in {expected_name}:\n{diff}")
+
+    if has_exp_schema or len(expected_schema_files) > 1:
+        for actual_name in actual_schema_files:
+            if actual_name not in expected_schema_files:
+                diffs.append(f"Missing expected schema snapshot for emitted file: {actual_name}")
+
+    # 2. Harvest & Validate Emitted Python Code
     py_dir = tmp_path / "build" / "python"
     actual_py_files: Dict[str, str] = {}
-    for p in py_dir.glob("*.py"):
-        actual_py_files[p.name] = p.read_text(encoding="utf-8").strip()
+    if py_dir.exists():
+        for p in py_dir.glob("*.py"):
+            actual_py_files[p.name] = p.read_text(encoding="utf-8").strip()
 
     module_stems = {
         Path(f).stem.lower().replace("-", "_")
@@ -229,7 +307,6 @@ def test_pipeline_and_execution(case_data, request, tmp_path: Path, bless_sessio
         for py_name, py_src in relevant_py_files.items():
             console.print(Panel(Syntax(py_src, "python", line_numbers=True), title=f"[bold blue]Emitted: {py_name}[/bold blue]"))
 
-    diffs = []
     for expected_name, expected_code in expected_py_files.items():
         actual_code = relevant_py_files.get(expected_name, "")
         if actual_code != expected_code:
@@ -255,23 +332,35 @@ def test_pipeline_and_execution(case_data, request, tmp_path: Path, bless_sessio
             assert False, f"Code generation mismatch in {fixture_path.name} (Test: {test_name}):\n{diff_report}"
         elif evaluate_enabled and verbose_enabled:
             console.print(
-                f"[yellow]Notice: Emitted code differs from snapshot in {fixture_path.name} (Test: {test_name}) (evaluating behavior)[/yellow]"
+                f"[yellow]Notice: Emitted output differs from snapshot in {fixture_path.name} (Test: {test_name}) (evaluating behavior)[/yellow]"
             )
 
     if bless_enabled:
+        if expected_schema_files or has_exp_schema:
+            schema_to_save = {}
+            if not has_exp_schema and len(actual_schema_files) == 1:
+                single_actual = list(actual_schema_files.values())[0]
+                schema_to_save[list(expected_schema_files.keys())[0]] = single_actual
+            else:
+                schema_to_save = actual_schema_files
+        else:
+            schema_to_save = {}
+
         blessed_chunk_str = serialize_fixture(
             natural_files,
+            schema_to_save,
             relevant_py_files,
             execute_yaml,
             has_exp_nat,
+            has_exp_schema or len(schema_to_save) > 1,
             has_exp_py or len(relevant_py_files) > 1,
             )
         bless_session_manager[fixture_path][test_name] = blessed_chunk_str
 
-    if not execute_yaml:
+    if not execute_yaml or not module_stems:
         return
 
-    # --- Execution Validation ---
+    # 3. Behavioral Execution Validation
     try:
         test_data = yaml.safe_load(execute_yaml)
         if isinstance(test_data, dict):
@@ -355,7 +444,7 @@ def test_pipeline_and_execution(case_data, request, tmp_path: Path, bless_sessio
             def refresh(self, *args): pass
 
         if verbose_enabled:
-            console.print(f"[bold cyan]5. Executing Test Cases against '{entrypoint_stem}.py':[/bold cyan]")
+            console.print(f"[bold cyan]Executing Test Cases against '{entrypoint_stem}.py':[/bold cyan]")
 
         for i, case in enumerate(test_cases, 1):
             records = []
@@ -372,6 +461,8 @@ def test_pipeline_and_execution(case_data, request, tmp_path: Path, bless_sessio
                         except Exception: pass
                     elif expected_type is bool and not isinstance(val, bool):
                         coerced_r[k] = str(val).lower() in ("true", "1", "yes", "t")
+                    elif isinstance(val, (dict, list)):
+                        coerced_r[k] = KeyedArray._wrap(val)
                 records.append(type("Record", (), coerced_r)())
 
             session = MockSession(records)

@@ -1,6 +1,6 @@
 === NATURAL: EMPLOYEES.ddm ===
-1 AC NAME                                 A  20  N N
-1 AB LANG                                 A   3  N (1:7)
+1 AC NAME                                  A  20  N N
+1 AB LANG                                  A   3  N (1:7)
 
 === NATURAL: SAMPLE.nsp ===
 DEFINE DATA LOCAL
@@ -36,11 +36,11 @@ class SampleContext:
 def execute_sample(ctx: SampleContext, session):
     for loop_idx, record in enumerate(session.query(Employees).filter((Employees.name >= 'SMITH')).limit(1), 1):
         loop_counter = loop_idx
-        print(tabulate(tab(5), record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 5)], tab(35), '<== LANG (1:6) AFTER READ'))
-        record.lang[0][0] = '***'
+        print(tabulate(tab(5), record.lang[str(ctx.offset)][(ctx.offset - 1):(ctx.offset + 5)], tab(35), '<== LANG (1:6) AFTER READ'))
+        record.lang['1']['1'] = '***'
         ctx.offset = 2
-        print(tabulate(tab(5), record.lang[0][0], tab(35), '<== LANG (1.1) AFTER TWO ASSIGNS'))
-        print(tabulate(tab(5), record.lang[(ctx.offset - 1)][(ctx.offset - 1):(ctx.offset + 4)], tab(35), '<== LANG (2:6) AFTER TWO ASSIGNS'))
+        print(tabulate(tab(5), record.lang['1']['1'], tab(35), '<== LANG (1.1) AFTER TWO ASSIGNS'))
+        print(tabulate(tab(5), record.lang[str(ctx.offset)][(ctx.offset - 1):(ctx.offset + 4)], tab(35), '<== LANG (2:6) AFTER TWO ASSIGNS'))
         session.flush()  # UPDATE committed for active loop
         myview2_record = session.get(Employees, record.id)
         print(tabulate(tab(5), myview2_record.lang[(1 - 1):(1 - 1) + 6], tab(35), '<== AFTER UPDATE AND GET'))
@@ -55,7 +55,7 @@ def execute_sample(ctx: SampleContext, session):
     - id: 1
       name: "SMITH"
       lang:
-        - ["EN", "FR", "DE", "ES", "IT", "NL", "PT"]
-        - ["AA", "BB", "CC", "DD", "EE", "FF", "GG"]
+        "1": {"1": "EN", "2": "FR", "3": "DE", "4": "ES", "5": "IT", "6": "NL", "7": "PT"}
+        "2": {"1": "AA", "2": "BB", "3": "CC", "4": "DD", "5": "EE", "6": "FF", "7": "GG"}
   expected:
     offset: 1

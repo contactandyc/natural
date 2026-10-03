@@ -15,6 +15,7 @@ from natural.ir.serializer import serialize_to_yaml
 from natural.normalizer.lowering import SemanticLoweringPass
 from natural.normalizer.pass1_parser import Pass1Parser
 from natural.normalizer.pass2_dispatcher import Pass2Dispatcher
+from natural.normalizer.schema_builder import SchemaBuilder
 from natural.normalizer.workspace import Workspace
 
 console = Console()
@@ -139,9 +140,10 @@ class ProjectBuilder:
         build_dir = self.workspace_dir / "build"
         ir0_dir = build_dir / "ir0"
         ir1_dir = build_dir / "ir1"
+        schema_dir = build_dir / "schema"
         target_dir = build_dir / self.backend.target_name
 
-        for d in [ir0_dir, ir1_dir, target_dir]:
+        for d in [ir0_dir, ir1_dir, schema_dir, target_dir]:
             d.mkdir(parents=True, exist_ok=True)
 
         expected_files: Set[Path] = set()
@@ -182,9 +184,17 @@ class ProjectBuilder:
             except Exception as e:
                 console.print(f"  [bold red]↳ Failed:[/bold red] {e}")
 
-        # Emit target schemas / ORM models
+        # Emit target schemas / ORM models & Schema IR (IR-S) documents
         ddms = [area for key, area in self.workspace._cache.items() if key.startswith("DDM_")]
-        schema_outputs = self.backend.emit_schema(ddms)
+        schema_builder = SchemaBuilder(ddms)
+        catalog = schema_builder.build_catalog()
+
+        for doc in catalog.documents.values():
+            schema_out = schema_dir / f"{doc.table_or_collection_name}.yaml"
+            expected_files.add(schema_out)
+            write_if_changed(schema_out, serialize_to_yaml(doc), show_diff)
+
+        schema_outputs = self.backend.emit_schema(catalog)
         for schema_relpath, schema_content in schema_outputs.items():
             schema_out = target_dir / schema_relpath
             expected_files.add(schema_out)
@@ -198,8 +208,12 @@ class ProjectBuilder:
             expected_files.add(runtime_out)
             write_if_changed(runtime_out, runtime_content, show_diff)
 
-        # Clean stale files in the target directory
+        # Clean stale files in target, schema, and IR directories
         for file_path in target_dir.rglob("*"):
+            if file_path.is_file() and file_path not in expected_files:
+                file_path.unlink()
+
+        for file_path in schema_dir.glob("*"):
             if file_path.is_file() and file_path not in expected_files:
                 file_path.unlink()
 

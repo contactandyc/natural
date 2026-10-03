@@ -4,8 +4,8 @@
 
 import importlib
 from abc import ABC, abstractmethod
-from typing import Dict, List, Type
-from natural.ir.models import DataAreaRef
+from typing import Dict, Type
+from natural.ir.schema import SchemaCatalog
 from natural.ir.semantic import SemanticModule
 
 
@@ -21,8 +21,8 @@ class TargetBackend(ABC):
         ...
 
     @abstractmethod
-    def emit_schema(self, ddms: List[DataAreaRef]) -> Dict[str, str]:
-        """Emits data schema / ORM files from DDMs (relative_path -> file_content)."""
+    def emit_schema(self, catalog: SchemaCatalog) -> Dict[str, str]:
+        """Emits data schema / ORM files from SchemaCatalog (relative_path -> file_content)."""
         ...
 
     @abstractmethod

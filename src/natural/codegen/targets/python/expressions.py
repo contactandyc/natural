@@ -44,11 +44,11 @@ class PythonExpressionEmitter:
             base_ref = self.ctx.resolve_ref(expr.symbol_id, model_class=model_class)
             if getattr(expr, "array_indices", None):
                 for idx in expr.array_indices:
-                    if idx.op == "literal" and isinstance(idx.value, int):
-                        base_ref = f"{base_ref}[{idx.value - 1}]"
+                    if idx.op == "literal" and isinstance(idx.value, (int, str)):
+                        base_ref = f"{base_ref}['{idx.value}']"
                     else:
                         idx_val = self.emit_expr(idx, model_class=model_class)
-                        base_ref = f"{base_ref}[({idx_val} - 1)]"
+                        base_ref = f"{base_ref}[str({idx_val})]"
             if expr.substring:
                 start_val = self.emit_expr(expr.substring.start, model_class=model_class)
                 s_idx = f"({start_val} - 1)"

@@ -19,11 +19,11 @@ class Workspace:
             for ext in exts:
                 p = d / f"{name}{ext}"
                 if p.exists():
-                    return p.read_text(encoding='utf-8')
+                    return p.read_text(encoding="utf-8")
 
                 p_lower = d / f"{name.lower()}{ext}"
                 if p_lower.exists():
-                    return p_lower.read_text(encoding='utf-8')
+                    return p_lower.read_text(encoding="utf-8")
         return None
 
     def get_data_area(self, name: str, scope: ScopeType | None) -> DataAreaRef | None:
@@ -34,7 +34,7 @@ class Workspace:
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        content = self._read_file(name, ['.nsa', '.nsl', '.nsg', '.nsp', '.txt'])
+        content = self._read_file(name, [".nsa", ".nsl", ".nsg", ".nsp", ".txt"])
         if not content:
             return None
 
@@ -107,13 +107,18 @@ class Workspace:
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        content = self._read_file(name, ['.ddm', '.txt'])
+        content = self._read_file(name, [".ddm", ".txt"])
         if not content:
             return None
 
         fields = []
-        pe_pattern = re.compile(r'^\s*(\d+)\s+(PE|GR)\s+([A-Z0-9\-]+)(?:\s*\(([0-9\:]+)\))?.*$', re.IGNORECASE)
-        pattern = re.compile(r'^\s*(\d+)\s+([A-Z0-9]{2})\s+([A-Z0-9\-]+)\s+([A-Z])\s+([\d\.]+)(.*)$')
+        pe_pattern = re.compile(
+            r"^\s*(\d+)\s+(PE|GR)\s+([A-Z0-9\-]+)(?:\s*\(([0-9\:]+)\))?.*$",
+            re.IGNORECASE,
+        )
+        pattern = re.compile(
+            r"^\s*(\d+)\s+([A-Z0-9]{2})\s+([A-Z0-9\-]+)\s+([A-Z])\s+([\d\.]+)(.*)$"
+        )
 
         current_pe_group: Optional[str] = None
 
@@ -122,20 +127,36 @@ class Workspace:
             if pe_match:
                 level = int(pe_match.group(1))
                 fname = pe_match.group(3)
-                dim_spec = pe_match.group(4) or "1"
-                max_idx = int(dim_spec.split(":")[-1]) if dim_spec else 1
+                dim_spec = pe_match.group(4)
+                dim_start = None
+                dim_end = None
+                max_idx = 1
+                if dim_spec:
+                    if ":" in dim_spec:
+                        parts = dim_spec.split(":")
+                        if parts[0].isdigit() and parts[1].isdigit():
+                            dim_start = int(parts[0])
+                            dim_end = int(parts[1])
+                    elif dim_spec.isdigit():
+                        dim_start = 1
+                        dim_end = int(dim_spec)
+                    max_idx = dim_end or 1
 
                 if level == 1:
                     current_pe_group = fname
 
-                fields.append(DataField(
-                    level=level,
-                    name=fname,
-                    format=FieldFormat(kind="periodic_group", raw_spec="PE"),
-                    is_periodic=True,
-                    array_dim=str(max_idx),
-                    max_index=max_idx,
-                ))
+                fields.append(
+                    DataField(
+                        level=level,
+                        name=fname,
+                        format=FieldFormat(kind="periodic_group", raw_spec="PE"),
+                        is_periodic=True,
+                        array_dim=str(max_idx) if dim_spec else None,
+                        max_index=max_idx,
+                        dim_start=dim_start or 1,
+                        dim_end=dim_end,
+                    )
+                )
                 continue
 
             match = pattern.match(line)
@@ -144,48 +165,89 @@ class Workspace:
                 code = match.group(2)
                 fname = match.group(3)
                 kind_char = match.group(4)
-                raw_spec = f"{kind_char}{match.group(5)}"
+                val_spec = match.group(5)
+                raw_spec = f"{kind_char}{val_spec}"
                 remainder = match.group(6)
 
                 if level == 1:
                     current_pe_group = None
 
                 kind_map = {
-                    "A": "alphanumeric", "P": "packed_decimal",
-                    "N": "numeric", "I": "integer",
-                    "B": "binary", "L": "boolean"
+                    "A": "alphanumeric",
+                    "P": "packed_decimal",
+                    "N": "numeric",
+                    "I": "integer",
+                    "B": "binary",
+                    "L": "boolean",
                 }
                 kind = kind_map.get(kind_char, "unknown")
+
+                digits = None
+                decimals = None
+                length = None
+                if "." in val_spec:
+                    p_parts = val_spec.split(".", 1)
+                    if p_parts[0].isdigit():
+                        digits = int(p_parts[0])
+                    if p_parts[1].isdigit():
+                        decimals = int(p_parts[1])
+                elif val_spec.isdigit():
+                    length = int(val_spec)
+                    digits = int(val_spec)
+
+                fmt = FieldFormat(
+                    kind=kind,
+                    raw_spec=raw_spec,
+                    length=length,
+                    digits=digits,
+                    decimals=decimals,
+                )
+
+                has_nested_parens = bool(re.search(r"\([^)]*\([^)]*\)", remainder))
 
                 sub_fields = []
                 array_dim = None
                 max_index = 1
+                dim_start = 1
+                dim_end = None
                 is_multiple = False
 
-                if "(" in remainder:
-                    raw_subs = re.findall(r'([A-Za-z0-9\-_]+)\s*\(\s*(\d+)\s*:\s*(\d+)\s*\)', remainder)
-                    if raw_subs:
-                        for s_name, s_start, s_end in raw_subs:
-                            sub_fields.append((s_name, int(s_start), int(s_end)))
-                    else:
-                        range_m = re.search(r'\(\s*(?:\d+\s*:\s*)?(\d+)\s*\)', remainder)
-                        if range_m:
-                            max_index = int(range_m.group(1))
-                            array_dim = str(max_index)
-                            is_multiple = True
+                if has_nested_parens:
+                    raw_subs = re.findall(
+                        r"([A-Za-z0-9\-_]+)\s*\(\s*(\d+)\s*:\s*(\d+)\s*\)",
+                        remainder,
+                    )
+                    for s_name, s_start, s_end in raw_subs:
+                        sub_fields.append((s_name, int(s_start), int(s_end)))
+                elif "(" in remainder:
+                    range_m = re.search(r"\(\s*(?:(\d+)\s*:\s*)?(\d+)\s*\)", remainder)
+                    if range_m:
+                        if range_m.group(1):
+                            dim_start = int(range_m.group(1))
+                            dim_end = int(range_m.group(2))
+                        else:
+                            dim_start = 1
+                            dim_end = int(range_m.group(2))
+                        max_index = dim_end
+                        array_dim = str(dim_end)
+                        is_multiple = True
 
                 parent_name = current_pe_group if (level > 1 and current_pe_group) else None
 
-                fields.append(DataField(
-                    level=level,
-                    name=fname,
-                    format=FieldFormat(kind=kind, raw_spec=raw_spec),
-                    sub_fields=sub_fields,
-                    array_dim=array_dim,
-                    max_index=max_index,
-                    is_multiple=is_multiple,
-                    parent_name=parent_name,
-                ))
+                fields.append(
+                    DataField(
+                        level=level,
+                        name=fname,
+                        format=fmt,
+                        sub_fields=sub_fields,
+                        array_dim=array_dim,
+                        max_index=max_index,
+                        dim_start=dim_start,
+                        dim_end=dim_end,
+                        is_multiple=is_multiple,
+                        parent_name=parent_name,
+                    )
+                )
 
         if fields:
             area = DataAreaRef(name=name, scope=ScopeType.LOCAL, inline_fields=fields)

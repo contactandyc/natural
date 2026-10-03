@@ -115,7 +115,7 @@ class PythonEmitter:
                 self.emit_line(f"if args.{py_name} is not None:")
                 with self.ctx.indent():
                     if getattr(sym, "is_array", False):
-                        self.emit_line(f"ctx.{py_name} = args.{py_name}.split(',')")
+                        self.emit_line(f"ctx.{py_name} = {{str(i): v for i, v in enumerate(args.{py_name}.split(','), 1)}}")
                     elif base_type == "date":
                         self.emit_line(f"ctx.{py_name} = date.fromisoformat(args.{py_name})")
                     elif base_type == "decimal":
@@ -222,7 +222,7 @@ class PythonEmitter:
                     py_name = self.ctx.clean_name(sym.name)
                     base = sym.semantic_type.base
                     if getattr(sym, "is_array", False):
-                        default = "[]"
+                        default = "{}"
                     elif sym.init_val is not None:
                         val = str(sym.init_val).strip()
                         if base == "integer":
@@ -274,7 +274,7 @@ class PythonEmitter:
                 self.emit_line(f"@{prop_name}.setter")
                 self.emit_line(f"def {prop_name}(self, val: int):")
                 with self.ctx.indent():
-                    self.emit_line(f"val_str = f'{{int(val):0{length}d}}'")
+                    self.emit_line("val_str = f'{int(val):0" + str(length) + "d}'")
                     self.emit_line(
                         f"self.{parent_name} = self.{parent_name}[:{start_off}] + val_str + self.{parent_name}[{end_off}:]"
                     )

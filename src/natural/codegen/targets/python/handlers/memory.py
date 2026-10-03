@@ -24,11 +24,11 @@ def emit_assign(
     target = ctx.resolve_ref(op.target_id)
     if getattr(op, "target_indices", None):
         for idx in op.target_indices:
-            if idx.op == "literal" and isinstance(idx.value, int):
-                target = f"{target}[{idx.value - 1}]"
+            if idx.op == "literal" and isinstance(idx.value, (int, str)):
+                target = f"{target}['{idx.value}']"
             else:
                 idx_val = expr_emitter.emit_expr(idx)
-                target = f"{target}[({idx_val} - 1)]"
+                target = f"{target}[str({idx_val})]"
 
     target_sym = ctx.get_symbol(op.target_id)
 
@@ -133,6 +133,8 @@ def emit_reset(
         default = "0"
     elif sym and sym.semantic_type.base == "boolean":
         default = "False"
+    elif sym and getattr(sym, "is_array", False):
+        default = "{}"
     else:
         default = '""'
     ctx.emit_line(f"{target} = {default}")

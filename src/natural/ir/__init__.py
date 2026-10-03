@@ -81,6 +81,13 @@ from .pass1_models import (
     RepeatBlock,
     SubroutineBlock,
 )
+from .schema import (
+    SchemaCatalog,
+    SchemaDataType,
+    SchemaDocument,
+    SchemaNode,
+    SchemaNodeType,
+)
 from .semantic import (
     CastKind,
     EntityGetOp,
@@ -155,6 +162,11 @@ __all__ = [
     "ResetStatement",
     "ResizeArrayStatement",
     "ScopeType",
+    "SchemaCatalog",
+    "SchemaDataType",
+    "SchemaDocument",
+    "SchemaNode",
+    "SchemaNodeType",
     "SemanticType",
     "SeparateStatement",
     "Statement",

@@ -2,9 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
-from typing import List, Optional
+from typing import List, Optional, Union
 from natural.codegen.common import CodeWriter, clean_name
 from natural.ir.models import DataAreaRef
+from natural.ir.schema import (
+    SchemaCatalog,
+    SchemaDataType,
+    SchemaNode,
+    SchemaNodeType,
+)
+from natural.normalizer.schema_builder import SchemaBuilder
 
 FALLBACK_ORM_SOURCE = """from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import declarative_base
@@ -24,8 +31,15 @@ def __getattr__(name):
 
 
 class ORMEmitter:
-    def __init__(self, ddms: List[DataAreaRef], writer: Optional[CodeWriter] = None):
-        self.ddms = ddms
+    def __init__(
+            self,
+            schema_source: Union[SchemaCatalog, List[DataAreaRef]],
+            writer: Optional[CodeWriter] = None,
+    ):
+        if isinstance(schema_source, SchemaCatalog):
+            self.catalog = schema_source
+        else:
+            self.catalog = SchemaBuilder(schema_source).build_catalog()
         self.writer = writer or CodeWriter()
 
     @property
@@ -38,66 +52,93 @@ class ORMEmitter:
     def emit_line(self, line: str = "", indent_level: int = 0) -> None:
         self.writer.emit_line(line, indent_offset=indent_level)
 
+    def _map_sa_type(self, node: SchemaNode) -> str:
+        if node.data_type == SchemaDataType.STRING:
+            length = node.length if node.length else 255
+            return f"String({length})"
+        elif node.data_type == SchemaDataType.DECIMAL:
+            prec = node.precision if node.precision is not None else 10
+            scale = node.scale if node.scale is not None else 0
+            return f"Numeric({prec}, {scale})"
+        elif node.data_type == SchemaDataType.INTEGER:
+            return "Integer"
+        elif node.data_type == SchemaDataType.BOOLEAN:
+            return "Boolean"
+        elif node.data_type == SchemaDataType.DATE:
+            return "Date"
+        elif node.data_type == SchemaDataType.BINARY:
+            return "Integer"
+        return "String(255)"
+
+    def _build_array_default(self, node: SchemaNode) -> str:
+        if not node.index_keys:
+            return "dict"
+
+        if node.node_type == SchemaNodeType.ARRAY_OBJECT:
+            child_defaults = []
+            for child in node.children:
+                ch_name = clean_name(child.name)
+                if child.data_type == SchemaDataType.STRING:
+                    ch_val = "''"
+                elif child.data_type == SchemaDataType.DECIMAL:
+                    ch_val = "Decimal('0')"
+                elif child.data_type in (SchemaDataType.INTEGER, SchemaDataType.BINARY):
+                    ch_val = "0"
+                elif child.data_type == SchemaDataType.BOOLEAN:
+                    ch_val = "False"
+                else:
+                    ch_val = "None"
+                child_defaults.append(f"'{ch_name}': {ch_val}")
+            inner_obj = "{" + ", ".join(child_defaults) + "}"
+            items = ", ".join(f"'{k}': {inner_obj}" for k in node.index_keys)
+            return f"lambda: {{{items}}}"
+
+        # ARRAY_PRIMITIVE
+        if node.data_type == SchemaDataType.STRING:
+            items = ", ".join(f"'{k}': ''" for k in node.index_keys)
+        elif node.data_type == SchemaDataType.DECIMAL:
+            items = ", ".join(f"'{k}': Decimal('0')" for k in node.index_keys)
+        elif node.data_type in (SchemaDataType.INTEGER, SchemaDataType.BINARY):
+            items = ", ".join(f"'{k}': 0" for k in node.index_keys)
+        elif node.data_type == SchemaDataType.BOOLEAN:
+            items = ", ".join(f"'{k}': False" for k in node.index_keys)
+        else:
+            items = ", ".join(f"'{k}': None" for k in node.index_keys)
+
+        return f"lambda: {{{items}}}"
+
     def generate(self) -> str:
         self.emit_line("from decimal import Decimal")
-        self.emit_line("from sqlalchemy import Column, String, Numeric, Integer, Boolean, JSON")
+        self.emit_line("from sqlalchemy import Column, String, Numeric, Integer, Boolean, JSON, Date")
         self.emit_line("from sqlalchemy.orm import declarative_base")
         self.emit_line("")
         self.emit_line("Base = declarative_base()")
         self.emit_line("")
 
-        for ddm in sorted(self.ddms, key=lambda d: d.name):
-            cleaned_ddm = clean_name(ddm.name).replace("_view", "")
-            class_name = cleaned_ddm.title().replace("_", "")
-            table_name = cleaned_ddm
+        for doc in sorted(self.catalog.documents.values(), key=lambda d: d.name):
+            class_name = doc.class_name
+            table_name = doc.table_or_collection_name
 
             self.emit_line(f"class {class_name}(Base):")
             with self.writer.indent():
                 self.emit_line(f"__tablename__ = '{table_name}'")
                 self.emit_line("")
 
-                for i, field in enumerate(ddm.inline_fields):
-                    if field.level > 1 and getattr(field, "parent_name", None):
+                for i, node in enumerate(doc.nodes):
+                    if node.node_type == SchemaNodeType.GROUP:
                         continue
 
-                    col_name = clean_name(field.name)
-                    kind = field.format.kind if field.format else "unknown"
-                    raw_spec = field.format.raw_spec if field.format else ""
+                    col_name = clean_name(node.name)
+                    pk_arg = ", primary_key=True" if i == 0 else ""
 
-                    if getattr(field, "is_multiple", False) or getattr(field, "is_periodic", False) or getattr(field, "array_dim", None):
-                        dim = int(field.array_dim) if (field.array_dim and field.array_dim.isdigit()) else getattr(field, "max_index", 1)
-                        if kind == "alphanumeric":
-                            default_expr = f'lambda: ["" for _ in range({dim})]'
-                        elif kind in ("packed_decimal", "numeric"):
-                            default_expr = f'lambda: [Decimal(\'0\') for _ in range({dim})]'
-                        elif kind in ("integer", "binary"):
-                            default_expr = f'lambda: [0 for _ in range({dim})]'
-                        else:
-                            default_expr = f'lambda: [None for _ in range({dim})]'
-                        pk_arg = ", primary_key=True" if i == 0 else ""
-                        self.emit_line(f"{col_name} = Column('{field.name.lower()}', JSON, default={default_expr}{pk_arg})")
-                    elif kind == "alphanumeric":
-                        length = ''.join(filter(str.isdigit, raw_spec))
-                        length = length if length else "255"
-                        sa_type = f"String({length})"
-                        pk_arg = ", primary_key=True" if i == 0 else ""
-                        self.emit_line(f"{col_name} = Column('{field.name.lower()}', {sa_type}{pk_arg})")
-                    elif kind in ("packed_decimal", "numeric"):
-                        parts = raw_spec[1:].split('.')
-                        prec = parts[0] if parts[0].isdigit() else "10"
-                        scale = parts[1] if len(parts) > 1 else "0"
-                        sa_type = f"Numeric({prec}, {scale})"
-                        pk_arg = ", primary_key=True" if i == 0 else ""
-                        self.emit_line(f"{col_name} = Column('{field.name.lower()}', {sa_type}{pk_arg})")
-                    elif kind in ("integer", "binary"):
-                        pk_arg = ", primary_key=True" if i == 0 else ""
-                        self.emit_line(f"{col_name} = Column('{field.name.lower()}', Integer{pk_arg})")
-                    elif kind == "boolean":
-                        pk_arg = ", primary_key=True" if i == 0 else ""
-                        self.emit_line(f"{col_name} = Column('{field.name.lower()}', Boolean{pk_arg})")
+                    if node.node_type in (SchemaNodeType.ARRAY_PRIMITIVE, SchemaNodeType.ARRAY_OBJECT):
+                        default_expr = self._build_array_default(node)
+                        self.emit_line(
+                            f"{col_name} = Column('{node.source_name.lower()}', JSON, default={default_expr}{pk_arg})"
+                        )
                     else:
-                        pk_arg = ", primary_key=True" if i == 0 else ""
-                        self.emit_line(f"{col_name} = Column('{field.name.lower()}', String{pk_arg})")
+                        sa_type = self._map_sa_type(node)
+                        self.emit_line(f"{col_name} = Column('{node.source_name.lower()}', {sa_type}{pk_arg})")
 
             self.emit_line("")
 
