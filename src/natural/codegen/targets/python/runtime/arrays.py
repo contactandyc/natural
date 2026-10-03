@@ -8,11 +8,7 @@ from typing import Any, List, Optional, Union
 class KeyedArray(dict):
     """
     1-based and arbitrary-bounded dictionary container representing Natural array memory.
-    Supports:
-      - Integer keys: arr[1], arr[1990]
-      - String keys: arr['1'], arr['1990']
-      - Slices: arr[1:6] (key-range) or arr[0:6] (positional fallback)
-      - Len, iteration, and serialization as standard JSON/dict
+    Supports integer/string keys, slices, and serialization as standard JSON/dict.
     """
 
     def __init__(self, *args, dim_start: int = 1, **kwargs):
@@ -39,13 +35,26 @@ class KeyedArray(dict):
 
     def __getitem__(self, key: Any) -> Any:
         if isinstance(key, slice):
-            vals = list(self.values())
             s_start = str(key.start) if key.start is not None else None
             s_stop = str(key.stop) if key.stop is not None else None
-            if s_start is not None and s_start in self and s_stop is not None and s_stop in self:
-                sub_keys = [k for k in self.keys() if int(s_start) <= int(k) <= int(s_stop)]
-                return [self[k] for k in sub_keys]
-            return vals[key]
+            if isinstance(key.start, str) or isinstance(key.stop, str):
+                try:
+                    start_val = int(s_start) if s_start is not None else None
+                    stop_val = int(s_stop) if s_stop is not None else None
+                    sub_keys = [
+                        k
+                        for k in self.keys()
+                        if (start_val is None or int(k) >= start_val)
+                           and (stop_val is None or int(k) <= stop_val)
+                    ]
+                    return [self[k] for k in sub_keys]
+                except (ValueError, TypeError):
+                    pass
+            vals = list(self.values())
+            try:
+                return vals[key]
+            except TypeError:
+                return vals
 
         s_key = str(key)
         if s_key in self:
@@ -68,8 +77,189 @@ class KeyedArray(dict):
         super().__setitem__(s_key, wrapped)
 
 
+class AdabasArrayProxy:
+    """
+    Proxies a 1:Many child table relationship to act like a 1-based keyed dictionary.
+    Mutations seamlessly append or update rows in the child collection.
+    """
+
+    def __init__(self, collection: Any, child_cls: Any, value_attr: str = "value"):
+        self._collection = collection
+        self._child_cls = child_cls
+        self._value_attr = value_attr
+
+    def _find_or_create(self, idx: Any) -> Any:
+        try:
+            target_idx = int(idx)
+        except (ValueError, TypeError):
+            target_idx = 1
+        for row in self._collection:
+            if getattr(row, "natural_index", None) == target_idx:
+                return row
+        new_row = self._child_cls(natural_index=target_idx)
+        self._collection.append(new_row)
+        return new_row
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, slice):
+            s = sorted(self._collection, key=lambda r: getattr(r, "natural_index", 0))
+            if isinstance(key.start, str) or isinstance(key.stop, str):
+                try:
+                    start_val = int(key.start) if key.start is not None else None
+                    stop_val = int(key.stop) if key.stop is not None else None
+                    return [
+                        getattr(r, self._value_attr)
+                        for r in s
+                        if (start_val is None or getattr(r, "natural_index", 0) >= start_val)
+                           and (stop_val is None or getattr(r, "natural_index", 0) <= stop_val)
+                    ]
+                except (ValueError, TypeError):
+                    pass
+
+            vals = [getattr(r, self._value_attr) for r in s]
+            try:
+                return vals[key]
+            except TypeError:
+                return vals
+
+        try:
+            target_idx = int(key)
+        except (ValueError, TypeError):
+            target_idx = None
+
+        if target_idx is not None:
+            for row in self._collection:
+                if getattr(row, "natural_index", None) == target_idx:
+                    return getattr(row, self._value_attr)
+
+            # 0-based positional fallback
+            if target_idx == 0:
+                for row in self._collection:
+                    if getattr(row, "natural_index", None) == 1:
+                        return getattr(row, self._value_attr)
+
+        return ""
+
+    def __setitem__(self, key: Any, val: Any) -> None:
+        row = self._find_or_create(key)
+        setattr(row, self._value_attr, val)
+
+    def __len__(self) -> int:
+        return len(self._collection)
+
+    def __iter__(self):
+        for row in sorted(self._collection, key=lambda r: getattr(r, "natural_index", 0)):
+            yield str(getattr(row, "natural_index", 0))
+
+    def values(self) -> List[Any]:
+        return [
+            getattr(r, self._value_attr)
+            for r in sorted(self._collection, key=lambda r: getattr(r, "natural_index", 0))
+        ]
+
+    def items(self):
+        return [
+            (str(getattr(r, "natural_index", 0)), getattr(r, self._value_attr))
+            for r in sorted(self._collection, key=lambda r: getattr(r, "natural_index", 0))
+        ]
+
+
+class AdabasRowProxy:
+    """Wraps a periodic child ORM row to allow both attribute and key access."""
+
+    def __init__(self, row: Any):
+        super().__setattr__("_row", row)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._row, name)
+
+    def __setattr__(self, name: str, val: Any) -> None:
+        if name == "_row":
+            super().__setattr__(name, val)
+        else:
+            setattr(self._row, name, val)
+
+    def __getitem__(self, key: Any) -> Any:
+        return getattr(self._row, str(key))
+
+    def __setitem__(self, key: Any, val: Any) -> None:
+        setattr(self._row, str(key), val)
+
+
+class AdabasObjectArrayProxy:
+    """
+    Proxies a Periodic Group (PE) child table relationship to act like a dictionary of row objects.
+    """
+
+    def __init__(self, collection: Any, child_cls: Any):
+        self._collection = collection
+        self._child_cls = child_cls
+
+    def _find_or_create(self, idx: Any) -> Any:
+        try:
+            target_idx = int(idx)
+        except (ValueError, TypeError):
+            target_idx = 1
+        for row in self._collection:
+            if getattr(row, "natural_index", None) == target_idx:
+                return row
+        new_row = self._child_cls(natural_index=target_idx)
+        self._collection.append(new_row)
+        return new_row
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, slice):
+            s = sorted(self._collection, key=lambda r: getattr(r, "natural_index", 0))
+            if isinstance(key.start, str) or isinstance(key.stop, str):
+                try:
+                    start_val = int(key.start) if key.start is not None else None
+                    stop_val = int(key.stop) if key.stop is not None else None
+                    return [
+                        AdabasRowProxy(r)
+                        for r in s
+                        if (start_val is None or getattr(r, "natural_index", 0) >= start_val)
+                           and (stop_val is None or getattr(r, "natural_index", 0) <= stop_val)
+                    ]
+                except (ValueError, TypeError):
+                    pass
+            vals = [AdabasRowProxy(r) for r in s]
+            try:
+                return vals[key]
+            except TypeError:
+                return vals
+
+        row = self._find_or_create(key)
+        return AdabasRowProxy(row)
+
+    def __setitem__(self, key: Any, val: Any) -> None:
+        row = self._find_or_create(key)
+        if isinstance(val, dict):
+            for k, v in val.items():
+                setattr(row, k, v)
+        else:
+            raise TypeError(f"Cannot assign non-dict {type(val)} to object array element")
+
+    def __len__(self) -> int:
+        return len(self._collection)
+
+    def __iter__(self):
+        for row in sorted(self._collection, key=lambda r: getattr(r, "natural_index", 0)):
+            yield str(getattr(row, "natural_index", 0))
+
+    def values(self) -> List[Any]:
+        return [
+            AdabasRowProxy(r)
+            for r in sorted(self._collection, key=lambda r: getattr(r, "natural_index", 0))
+        ]
+
+    def items(self):
+        return [
+            (str(getattr(r, "natural_index", 0)), AdabasRowProxy(r))
+            for r in sorted(self._collection, key=lambda r: getattr(r, "natural_index", 0))
+        ]
+
+
 def expand_array(arr: Any, size: int, fill: Any = None) -> Any:
-    """Expands array or keyed dictionary to target size."""
     target_size = int(size)
     if isinstance(arr, (dict, KeyedArray)):
         for i in range(1, target_size + 1):
@@ -83,7 +273,6 @@ def expand_array(arr: Any, size: int, fill: Any = None) -> Any:
 
 
 def reduce_array(arr: Any, size: int) -> Any:
-    """Truncates array or keyed dictionary to target size."""
     target_size = int(size)
     if isinstance(arr, (dict, KeyedArray)):
         keys_to_del = [k for k in list(arr.keys()) if k.isdigit() and int(k) > target_size]
@@ -96,7 +285,6 @@ def reduce_array(arr: Any, size: int) -> Any:
 
 
 def resize_array(arr: Any, size: int, fill: Any = None) -> Any:
-    """Resizes array or keyed dictionary to target size."""
     target_size = int(size)
     if isinstance(arr, (dict, KeyedArray)):
         reduce_array(arr, target_size)

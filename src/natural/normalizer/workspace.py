@@ -234,6 +234,11 @@ class Workspace:
 
                 parent_name = current_pe_group if (level > 1 and current_pe_group) else None
 
+                is_super = code.upper() == "SP" or bool(re.search(r"\bSP\b", remainder)) or (bool(sub_fields) and len(sub_fields) > 1)
+                is_sub = code.upper() == "SB" or bool(re.search(r"\bSB\b", remainder)) or (bool(sub_fields) and len(sub_fields) == 1)
+                is_uniq = bool(re.search(r"\b(U|UQ)\b", remainder))
+                is_desc = is_super or is_sub or is_uniq or bool(re.search(r"\b(D|DE)\b", remainder))
+
                 fields.append(
                     DataField(
                         level=level,
@@ -245,6 +250,10 @@ class Workspace:
                         dim_start=dim_start,
                         dim_end=dim_end,
                         is_multiple=is_multiple,
+                        is_descriptor=is_desc,
+                        is_unique=is_uniq,
+                        is_subdescriptor=is_sub,
+                        is_superdescriptor=is_super,
                         parent_name=parent_name,
                     )
                 )

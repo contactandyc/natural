@@ -3,6 +3,9 @@
 # Maintainer: Andy Curtis <contactandyc@gmail.com>
 
 from natural.codegen.targets.python.runtime.arrays import (
+    AdabasArrayProxy,
+    AdabasObjectArrayProxy,
+    AdabasRowProxy,
     KeyedArray,
     expand_array,
     reduce_array,
@@ -14,6 +17,9 @@ from natural.codegen.targets.python.runtime.unmask import unmask_decimal, unmask
 
 __all__ = [
     "KeyedArray",
+    "AdabasArrayProxy",
+    "AdabasObjectArrayProxy",
+    "AdabasRowProxy",
     "unmask_decimal",
     "unmask_integer",
     "Tab",

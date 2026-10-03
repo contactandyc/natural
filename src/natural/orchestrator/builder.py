@@ -16,6 +16,7 @@ from natural.normalizer.lowering import SemanticLoweringPass
 from natural.normalizer.pass1_parser import Pass1Parser
 from natural.normalizer.pass2_dispatcher import Pass2Dispatcher
 from natural.normalizer.schema_builder import SchemaBuilder
+from natural.normalizer.schema_normalizer import SchemaNormalizer
 from natural.normalizer.workspace import Workspace
 
 console = Console()
@@ -48,9 +49,15 @@ def write_if_changed(file_path: Path, new_content: str, show_diff: bool) -> bool
 
 
 class ProjectBuilder:
-    def __init__(self, workspace_dir: Path, target: str = "python"):
+    def __init__(
+            self,
+            workspace_dir: Path,
+            target: str = "python",
+            normalize_arrays: bool = False,
+    ):
         self.workspace_dir = workspace_dir
         self.target_name = target
+        self.normalize_arrays = normalize_arrays
         self.backend = get_target(target)
         self.workspace = Workspace(include_dirs=[workspace_dir])
         self.parser = Pass1Parser(self.workspace)
@@ -188,6 +195,9 @@ class ProjectBuilder:
         ddms = [area for key, area in self.workspace._cache.items() if key.startswith("DDM_")]
         schema_builder = SchemaBuilder(ddms)
         catalog = schema_builder.build_catalog()
+
+        if self.normalize_arrays:
+            catalog = SchemaNormalizer().normalize(catalog)
 
         for doc in catalog.documents.values():
             schema_out = schema_dir / f"{doc.table_or_collection_name}.yaml"

@@ -34,6 +34,10 @@ class DataField(BaseModel):
     dim_end: Optional[int] = None
     is_periodic: bool = False
     is_multiple: bool = False
+    is_descriptor: bool = False
+    is_unique: bool = False
+    is_subdescriptor: bool = False
+    is_superdescriptor: bool = False
     init_val: Optional[Any] = None
     sub_fields: List[Any] = Field(default_factory=list)
 

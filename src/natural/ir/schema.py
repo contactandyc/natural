@@ -26,6 +26,38 @@ class SchemaDataType(str, Enum):
     UNKNOWN = "unknown"
 
 
+class SchemaIndexType(str, Enum):
+    STANDARD = "standard"  # Adabas DE (Descriptor)
+    UNIQUE = "unique"      # Adabas UQ (Unique descriptor)
+    SUPER = "super"        # Adabas SP (Superdescriptor)
+    SUB = "sub"            # Adabas SB (Subdescriptor)
+
+
+class SchemaIndexPart(BaseModel):
+    field_name: str
+    start: Optional[int] = None
+    length: Optional[int] = None
+
+
+class SchemaIndex(BaseModel):
+    name: str
+    source_name: str
+    index_type: SchemaIndexType = SchemaIndexType.STANDARD
+    is_unique: bool = False
+    parts: List[SchemaIndexPart] = Field(default_factory=list)
+
+
+class SchemaRelation(BaseModel):
+    name: str
+    target_document: str
+    foreign_key_col: str
+    is_collection: bool = True
+    proxy_property: str
+    value_field: Optional[str] = "value"
+    child_class_name: str
+    is_object_array: bool = False
+
+
 class SchemaNode(BaseModel):
     name: str
     source_name: str
@@ -38,7 +70,11 @@ class SchemaNode(BaseModel):
     scale: Optional[int] = None
     dim_start: Optional[int] = None
     dim_end: Optional[int] = None
+    is_primary_key: Optional[bool] = None
+    is_foreign_key: Optional[bool] = None
+    references_table: Optional[str] = None
     is_descriptor: Optional[bool] = None
+    is_unique: Optional[bool] = None
     is_subdescriptor: Optional[bool] = None
     is_superdescriptor: Optional[bool] = None
     sub_fields: List[Tuple[str, int, int]] = Field(default_factory=list)
@@ -71,7 +107,10 @@ class SchemaDocument(BaseModel):
     name: str
     class_name: str
     table_or_collection_name: str
+    parent_document: Optional[str] = None
     nodes: List[SchemaNode] = Field(default_factory=list)
+    indexes: List[SchemaIndex] = Field(default_factory=list)
+    relations: List[SchemaRelation] = Field(default_factory=list)
 
     def get_node(self, name: str) -> Optional[SchemaNode]:
         clean = name.upper()

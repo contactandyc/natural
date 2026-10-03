@@ -9,6 +9,9 @@ from natural.ir.schema import (
     SchemaCatalog,
     SchemaDataType,
     SchemaDocument,
+    SchemaIndex,
+    SchemaIndexPart,
+    SchemaIndexType,
     SchemaNode,
     SchemaNodeType,
 )
@@ -70,6 +73,11 @@ class SchemaBuilder:
                 and node_type in (SchemaNodeType.ARRAY_PRIMITIVE, SchemaNodeType.ARRAY_OBJECT)
         )
 
+        is_desc = True if field.is_descriptor else None
+        is_uniq = True if field.is_unique else None
+        is_sub = True if field.is_subdescriptor else None
+        is_super = True if (field.is_superdescriptor or bool(field.sub_fields)) else None
+
         return SchemaNode(
             name=clean_name(field.name),
             source_name=field.name,
@@ -81,7 +89,10 @@ class SchemaBuilder:
             scale=scale,
             dim_start=field.dim_start if has_explicit_bounds else None,
             dim_end=field.dim_end if has_explicit_bounds else None,
-            is_superdescriptor=True if bool(field.sub_fields) else None,
+            is_descriptor=is_desc,
+            is_unique=is_uniq,
+            is_subdescriptor=is_sub,
+            is_superdescriptor=is_super,
             sub_fields=field.sub_fields,
             children=[],
         )
@@ -96,6 +107,7 @@ class SchemaBuilder:
             class_name=class_name,
             table_or_collection_name=table_name,
             nodes=[],
+            indexes=[],
         )
 
         current_parent_node: Optional[SchemaNode] = None
@@ -113,6 +125,55 @@ class SchemaBuilder:
                 current_parent_node.children.append(node)
             else:
                 doc.nodes.append(node)
+
+        # Build Document-level index metadata
+        for node in doc.nodes:
+            if node.is_superdescriptor and node.sub_fields:
+                parts = [
+                    SchemaIndexPart(
+                        field_name=clean_name(s_name),
+                        start=s_start,
+                        length=(s_end - s_start + 1),
+                    )
+                    for s_name, s_start, s_end in node.sub_fields
+                ]
+                doc.indexes.append(
+                    SchemaIndex(
+                        name=f"ix_{table_name}_{node.name}",
+                        source_name=node.source_name,
+                        index_type=SchemaIndexType.SUPER,
+                        is_unique=bool(node.is_unique),
+                        parts=parts,
+                    )
+                )
+            elif node.is_subdescriptor and node.sub_fields:
+                s_name, s_start, s_end = node.sub_fields[0]
+                parts = [
+                    SchemaIndexPart(
+                        field_name=clean_name(s_name),
+                        start=s_start,
+                        length=(s_end - s_start + 1),
+                    )
+                ]
+                doc.indexes.append(
+                    SchemaIndex(
+                        name=f"ix_{table_name}_{node.name}",
+                        source_name=node.source_name,
+                        index_type=SchemaIndexType.SUB,
+                        is_unique=bool(node.is_unique),
+                        parts=parts,
+                    )
+                )
+            elif node.is_descriptor or node.is_unique:
+                doc.indexes.append(
+                    SchemaIndex(
+                        name=f"ix_{table_name}_{node.name}",
+                        source_name=node.source_name,
+                        index_type=SchemaIndexType.UNIQUE if node.is_unique else SchemaIndexType.STANDARD,
+                        is_unique=bool(node.is_unique),
+                        parts=[SchemaIndexPart(field_name=node.name)],
+                    )
+                )
 
         return doc
 

@@ -925,3 +925,79 @@ Added an 8-part integration fixture verifying semantic typing, code generation, 
 
 - Updated `CRITIQUE.md` to reflect completed milestones: regex micro-parser eradication, pluggable `TargetBackend` architecture, modular `natural_runtime` packages, and golden-master snapshot testing.
 - Formulated the next strategic roadmap covering Schema IR (IR-S) generation (Prisma/DDL/OpenAPI 3.0), relational normalization passes for `PE`/`MU` groups, and AST program slicing for REST API + React UI modernization.
+
+---
+
+# Chat - Schema IR Hardening, Pluggable Multi-Database Emitters & 1NF Relational Normalization
+https://share.gemini.google/dFHVe5VZrj2V
+
+### Summary of Changes
+
+This update completes the data modeling and schema transformation subsystem of the compiler. It introduces target-agnostic descriptor and index modeling into the Schema IR (IR-S), adds multi-dimensional array support (Multiple-Value fields nested inside Periodic Groups), implements four standalone pluggable schema emitters (SQL DDL, MongoDB Mongoose, Prisma, and OpenAPI 3.0), delivers an opt-in 1st Normal Form (1NF) relational normalization pass (`--normalize-arrays`) with runtime proxy descriptors, exposes dedicated `natural schema` CLI commands, and establishes comprehensive unit and behavioral test suites.
+
+---
+
+### 1. Schema IR & Descriptor Modeling (`src/natural/ir/schema.py`, `src/natural/ir/models.py`, `src/natural/ir/__init__.py`)
+
+* **Index & Descriptor Types:** Introduced `SchemaIndexType` (`STANDARD`, `UNIQUE`, `SUPER`, `SUB`), `SchemaIndexPart`, and `SchemaIndex` to formalize Adabas search and constraint descriptors.
+* **Relational Metadata:** Added `SchemaRelation` to capture inter-table parent/child associations (`target_document`, `foreign_key_col`, `proxy_property`, `value_field`, `child_class_name`, `is_object_array`).
+* **AST Descriptor Annotations:** Augmented `DataField` and `SchemaNode` with flags for `is_descriptor`, `is_unique`, `is_subdescriptor`, `is_superdescriptor`, `is_primary_key`, `is_foreign_key`, and `references_table`.
+* **Document Index Collections:** Extended `SchemaDocument` with `indexes: List[SchemaIndex]`, `relations: List[SchemaRelation]`, and `parent_document` metadata.
+
+---
+
+### 2. DDM Descriptor Extraction & Schema Synthesis (`normalizer/`)
+
+* **Descriptor Regex Parsing (`workspace.py`):** Enhanced DDM row parsing to identify standard descriptors (`D`/`DE`), unique descriptors (`U`/`UQ`), subdescriptors (`SB`), and composite superdescriptors (`SP`).
+* **Index Synthesis (`schema_builder.py`):**
+* Synthesizes single-column indexes for standard and unique descriptors.
+* Deconstructs superdescriptor substring spans (`NAME(1:10)`, `DEPT(1:4)`) into discrete, ordered `SchemaIndexPart` definitions.
+
+
+* **1NF Relational Normalizer (`schema_normalizer.py`):**
+* Implemented `SchemaNormalizer.normalize()` to decompose hierarchical documents into flat, relational child tables when requested.
+* Shreds Multiple-Value (`MU`) arrays into `{parent}_{field}` child tables with `natural_index`, foreign keys with cascading deletes, and composite unique indexes (`uq_{table}_idx`).
+* Recursively decomposes Periodic Groups (`PE`) and nested `MU`-in-`PE` structures into hierarchical child/grandchild relational tables.
+
+
+
+---
+
+### 3. Pluggable Schema Emitters (`src/natural/codegen/schema/`)
+
+Created a modular schema generation package supporting multiple modern database architectures from a single `SchemaCatalog`:
+
+* **Raw SQL DDL Emitter (`sql_ddl.py`):** Emits dialect-specific `CREATE TABLE` and `CREATE INDEX` scripts supporting PostgreSQL, MySQL, SQLite, and Oracle, incorporating synthetic primary keys, foreign keys, and JSON/JSONB fallbacks.
+* **MongoDB Mongoose Emitter (`mongo.py`):** Generates TypeScript Mongoose document schemas with embedded sub-schemas for Periodic Groups, `Map` types for bounded arrays, and compound index declarations.
+* **Prisma Schema Emitter (`prisma.py`):** Produces `schema.prisma` declarations with `@id`, `@default(autoincrement())`, `@@unique`, and `@@index` block attributes.
+* **OpenAPI 3.0 / JSON Schema Emitter (`openapi.py`):** Emits OpenAPI 3.0.3 specification YAML defining API `components/schemas` for all DDM entities and periodic sub-objects.
+
+---
+
+### 4. SQLAlchemy ORM & Runtime Proxy Bridges (`codegen/targets/python/`)
+
+* **Recursive Multi-Dimensional Defaults (`orm.py`):** Updated `_build_array_default()` to recursively construct nested dictionary defaults for complex structures like `MU` arrays nested inside `PE` periodic groups.
+* **Index & Foreign Key Emission (`orm.py`):** Added table-level `__table_args__ = (Index(...),)` emission and `ForeignKey` column constraints.
+* **Relationship & Proxy Descriptor Codegen (`orm.py`):** When emitting normalized 1NF schemas, generates SQLAlchemy `relationship(..., cascade="all, delete-orphan", lazy="joined")` alongside Python `@property` accessors.
+* **Runtime Descriptors (`runtime/arrays.py`, `runtime/__init__.py`):**
+* `AdabasArrayProxy`: Proxies child row collections as 1-based keyed arrays, automatically appending or updating child rows on assignment and supporting key-range and positional slicing.
+* `AdabasObjectArrayProxy` & `AdabasRowProxy`: Proxies periodic child tables as dictionaries of row objects, providing dual attribute/key item access for periodic records.
+
+
+
+---
+
+### 5. Compiler Orchestration & First-Class CLI Commands (`orchestrator/`, `src/natural/cli.py`)
+
+* **Builder Normalization Hook (`builder.py`):** Added `normalize_arrays: bool = False` to `ProjectBuilder`, piping the schema catalog through `SchemaNormalizer` when active.
+* **Export CLI Subcommand (`natural schema export`):** Added CLI tooling to export DDMs directly to `sql`, `mongo`, `prisma`, `openapi`, or `sqlalchemy` with dialect selection and `--normalize-arrays` options.
+* **Inspect CLI Subcommand (`natural schema inspect`):** Added CLI functionality to parse DDMs and print the target-agnostic Schema IR catalog as audited YAML.
+* **Pipeline Flags:** Integrated `--normalize-arrays` (`-N`) into `natural parse` and `natural build`.
+
+---
+
+### 6. Test Suite & Verification (`tests/`)
+
+* **Schema Emitter Coverage (`tests/test_schema_emitters.py`):** Unit tests asserting index extraction (DE, UQ, SP), 2D multi-dimensional arrays (`MU` in `PE`), and all four target schema emitters (SQL DDL, Mongoose, Prisma, OpenAPI 3.0).
+* **Relational Normalizer Coverage (`tests/test_relational_normalizer.py`):** Unit and behavioral tests verifying 1NF decomposition, child table DDL, SQLAlchemy relationship mapping, and in-memory execution of `AdabasArrayProxy` and `AdabasObjectArrayProxy`.
+* **Roadmap Documentation (`TODO.md`):** Outlined remaining schema edge cases, including query predicate lowering for 1NF `.any()` subqueries, generated stored columns for superdescriptors, cross-DDM foreign key mappings, and Alembic/Flyway migration generators.
